@@ -1,16 +1,22 @@
 cmake_minimum_required(VERSION 3.5.1)
+project(awsim)
+
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
-set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_BUILD_TYPE RelWithDebInfo)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-# preprocessor defines
-set(httpserver_DEFAULT_NUMBER_OF_STATIC_WORKERS 4)
-set(httpserver_DEFAULT_DYNAMIC_WORKERS false)
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Og -g -Werror -Wall -Wextra -DAWSIM_DEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE, "${CMAKE_CXX_FLAGS_RELEASE} -Ofast -Werror -Wall -Wextra")
+set(CMAKE_CXX_COMPILER, clang++)
 
-project(httpserver)
-add_executable(httpserver
-    ${SRC_DIR}/main.cpp
-    ${SRC_DIR}/Server.cpp)
-target_include_directories(httpserver PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includes)
+find_package(Threads)
+add_executable(awsimd
+    ${SRC_DIR}/awsimd.cpp
+    ${SRC_DIR}/Server.cpp
+    ${SRC_DIR}/Worker.cpp
+    ${SRC_DIR}/Client.cpp
+    ${SRC_DIR}/CriticalException.cpp
+    ${SRC_DIR}/HttpParser.cpp
+    ${SRC_DIR}/flags.cpp)
+target_include_directories(awsimd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includes)
+target_link_libraries(awsimd ${CMAKE_THREAD_LIBS_INIT})
