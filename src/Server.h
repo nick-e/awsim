@@ -31,6 +31,7 @@
 #include "flags.h"
 #include "defaults.h"
 #include "HttpParser.h"
+#include "HttpRequest.h"
 
 #define AF_FAMILY_TO_STR(a) ((a) == AF_INET ? "AF_INET" : (a) == AF_INET6 \
     ? "AF_INET6" : (a) == AF_UNIX ? "AF_UNIX" : "UNKNOWN")
@@ -76,6 +77,8 @@ namespace awsim
                 static const uint64_t MAX_NUMBER_OF_EPOLL_EVENTS = 8192;
                 static const uint64_t SERVER_PIPE_BUFFER_SIZE = 512;
 
+                static HttpParserSettings httpParserSettings;
+
                 enum class State
                 {
                     WeakStopPending,
@@ -111,6 +114,8 @@ namespace awsim
                     bool https;
                     int sock;
 
+                    void init(int clientSocket, bool https);
+
                     Client *next;
                     Client *prev;
                 };
@@ -124,6 +129,7 @@ namespace awsim
                 int epollfd;
                 int serverReadfd;
                 uint64_t id;
+                HttpParser httpParser;
 
                 // Used by server thread
                 std::thread thread;

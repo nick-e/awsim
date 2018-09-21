@@ -43,7 +43,7 @@ do {                                                                 \
   parser->state = state;                                             \
   assert(HTTP_PARSER_ERRNO(parser) == HPE_OK);                       \
                                                                      \
-  if (0 != settings->on_##FOR(parser)) {                             \
+  if (0 != settings->on_##FOR(request, parser)) {                    \
     SET_ERRNO(HPE_CB_##FOR);                                         \
   }                                                                  \
                                                                      \
@@ -66,7 +66,7 @@ do {                                                                 \
   assert(HTTP_PARSER_ERRNO(parser) == HPE_OK);                       \
                                                                      \
   if (FOR##_mark) {                                                  \
-    if (0 != settings->on_##FOR(parser, FOR##_mark, (LEN))) {        \
+    if (0 != settings->on_##FOR(request, parser, FOR##_mark, (LEN))) {\
       SET_ERRNO(HPE_CB_##FOR);                                       \
     }                                                                \
                                                                      \
@@ -90,7 +90,7 @@ do {                                                                 \
 #define CALLBACK_SPACE(FOR)                                          \
 do {                                                                 \
   parser->state = state;                                             \
-  if (0 != settings->on_##FOR(parser, SPACE, 1)) {                   \
+  if (0 != settings->on_##FOR(request, parser, SPACE, 1)) {           \
     SET_ERRNO(HPE_CB_##FOR);                                         \
     return (p - data);                                               \
   }                                                                  \
@@ -571,8 +571,9 @@ parse_url_char(enum state s, const char ch)
   return s_dead;
 }
 
-size_t http_parser_execute (HttpParser *parser,
-                            const http_parser_settings *settings,
+size_t http_parser_execute (HttpRequest *request,
+                            HttpParser *parser,
+                            const HttpParserSettings *settings,
                             const char *data,
                             size_t len)
 {
@@ -695,7 +696,7 @@ size_t http_parser_execute (HttpParser *parser,
           }
 
           parser->type = HTTP_REQUEST;
-          parser->method = HTTP_HEAD;
+          parser->method = HTTPRequestMethod::HEAD;
           parser->index = 2;
           state = s_req_method;
         }
@@ -900,24 +901,24 @@ size_t http_parser_execute (HttpParser *parser,
           goto error;
         }
 
-        parser->method = (enum http_method) 0;
+        parser->method = HTTPRequestMethod::DELETE;
         parser->index = 1;
         switch (ch) {
-          case 'C': parser->method = HTTP_CONNECT; /* or COPY, CHECKOUT */ break;
-          case 'D': parser->method = HTTP_DELETE; break;
-          case 'G': parser->method = HTTP_GET; break;
-          case 'H': parser->method = HTTP_HEAD; break;
-          case 'L': parser->method = HTTP_LOCK; break;
-          case 'M': parser->method = HTTP_MKCOL; /* or MOVE, MKACTIVITY, MERGE, M-SEARCH */ break;
-          case 'N': parser->method = HTTP_NOTIFY; break;
-          case 'O': parser->method = HTTP_OPTIONS; break;
-          case 'P': parser->method = HTTP_POST;
+          case 'C': parser->method = HTTPRequestMethod::CONNECT; /* or COPY, CHECKOUT */ break;
+          case 'D': parser->method = HTTPRequestMethod::DELETE; break;
+          case 'G': parser->method = HTTPRequestMethod::GET; break;
+          case 'H': parser->method = HTTPRequestMethod::HEAD; break;
+          case 'L': parser->method = HTTPRequestMethod::LOCK; break;
+          case 'M': parser->method = HTTPRequestMethod::MKCOL; /* or MOVE, MKACTIVITY, MERGE, M-SEARCH */ break;
+          case 'N': parser->method = HTTPRequestMethod::NOTIFY; break;
+          case 'O': parser->method = HTTPRequestMethod::OPTIONS; break;
+          case 'P': parser->method = HTTPRequestMethod::POST;
             /* or PROPFIND or PROPPATCH or PUT or PATCH */
             break;
-          case 'R': parser->method = HTTP_REPORT; break;
-          case 'S': parser->method = HTTP_SUBSCRIBE; break;
-          case 'T': parser->method = HTTP_TRACE; break;
-          case 'U': parser->method = HTTP_UNLOCK; /* or UNSUBSCRIBE */ break;
+          case 'R': parser->method = HTTPRequestMethod::REPORT; break;
+          case 'S': parser->method = HTTPRequestMethod::SUBSCRIBE; break;
+          case 'T': parser->method = HTTPRequestMethod::TRACE; break;
+          case 'U': parser->method = HTTPRequestMethod::UNLOCK; /* or UNSUBSCRIBE */ break;
           default:
             SET_ERRNO(HPE_INVALID_METHOD);
             goto error;
@@ -934,45 +935,45 @@ size_t http_parser_execute (HttpParser *parser,
           goto error;
         }
 
-        const char *matcher = method_strings[parser->method];
+        const char *matcher = method_strings[(int)parser->method];
         if (ch == ' ' && matcher[parser->index] == '\0') {
           state = s_req_spaces_before_url;
         } else if (ch == matcher[parser->index]) {
           ; /* nada */
-        } else if (parser->method == HTTP_CONNECT) {
+        } else if (parser->method == HTTPRequestMethod::CONNECT) {
           if (parser->index == 1 && ch == 'H') {
-            parser->method = HTTP_CHECKOUT;
+            parser->method = HTTPRequestMethod::CHECKOUT;
           } else if (parser->index == 2  && ch == 'P') {
-            parser->method = HTTP_COPY;
+            parser->method = HTTPRequestMethod::COPY;
           } else {
             goto error;
           }
-        } else if (parser->method == HTTP_MKCOL) {
+        } else if (parser->method == HTTPRequestMethod::MKCOL) {
           if (parser->index == 1 && ch == 'O') {
-            parser->method = HTTP_MOVE;
+            parser->method = HTTPRequestMethod::MOVE;
           } else if (parser->index == 1 && ch == 'E') {
-            parser->method = HTTP_MERGE;
+            parser->method = HTTPRequestMethod::MERGE;
           } else if (parser->index == 1 && ch == '-') {
-            parser->method = HTTP_MSEARCH;
+            parser->method = HTTPRequestMethod::MSEARCH;
           } else if (parser->index == 2 && ch == 'A') {
-            parser->method = HTTP_MKACTIVITY;
+            parser->method = HTTPRequestMethod::MKACTIVITY;
           } else {
             goto error;
           }
-        } else if (parser->index == 1 && parser->method == HTTP_POST) {
+        } else if (parser->index == 1 && parser->method == HTTPRequestMethod::POST) {
           if (ch == 'R') {
-            parser->method = HTTP_PROPFIND; /* or HTTP_PROPPATCH */
+            parser->method = HTTPRequestMethod::PROPFIND; /* or HTTPRequestMethod::PROPATCH */
           } else if (ch == 'U') {
-            parser->method = HTTP_PUT;
+            parser->method = HTTPRequestMethod::PUT;
           } else if (ch == 'A') {
-            parser->method = HTTP_PATCH;
+            parser->method = HTTPRequestMethod::PATCH;
           } else {
             goto error;
           }
-        } else if (parser->index == 2 && parser->method == HTTP_UNLOCK && ch == 'S') {
-          parser->method = HTTP_UNSUBSCRIBE;
-        } else if (parser->index == 4 && parser->method == HTTP_PROPFIND && ch == 'P') {
-          parser->method = HTTP_PROPPATCH;
+        } else if (parser->index == 2 && parser->method == HTTPRequestMethod::UNLOCK && ch == 'S') {
+          parser->method = HTTPRequestMethod::UNSUBSCRIBE;
+        } else if (parser->index == 4 && parser->method == HTTPRequestMethod::PROPFIND && ch == 'P') {
+          parser->method = HTTPRequestMethod::PROPPATCH;
         } else {
           SET_ERRNO(HPE_INVALID_METHOD);
           goto error;
@@ -987,7 +988,7 @@ size_t http_parser_execute (HttpParser *parser,
         if (ch == ' ') break;
 
         // CONNECT requests must be followed by a <host>:<port>
-        if (parser->method == HTTP_CONNECT) {
+        if (parser->method == HTTPRequestMethod::CONNECT) {
           MARK(url);
           state = s_req_host_start;
           goto reexecute_byte;
@@ -1824,7 +1825,7 @@ size_t http_parser_execute (HttpParser *parser,
 
         /* Set this here so that on_headers_complete() callbacks can see it */
         parser->upgrade =
-            (parser->flags & F_UPGRADE || parser->method == HTTP_CONNECT);
+            (parser->flags & F_UPGRADE || parser->method == HTTPRequestMethod::CONNECT);
 
         /* Here we call the headers_complete callback. This is somewhat
          * different than other callbacks because if the user returns 1, we
@@ -1836,7 +1837,8 @@ size_t http_parser_execute (HttpParser *parser,
          * we have to simulate it by handling a change in errno below.
          */
         size_t header_size = p - data + 1;
-        switch (settings->on_headers_complete(parser, nullptr, header_size)) {
+        switch (settings->on_headers_complete(request, parser, nullptr,
+          header_size)) {
           case 0:
             break;
 
@@ -1866,7 +1868,7 @@ size_t http_parser_execute (HttpParser *parser,
         data_or_header_data_start = p;
 
         int hasBody = parser->flags & F_CHUNKED || parser->content_length > 0;
-        if (parser->upgrade && (parser->method == HTTP_CONNECT ||
+        if (parser->upgrade && (parser->method == HTTPRequestMethod::CONNECT ||
                                 (parser->flags & F_SKIPBODY) || !hasBody)) {
           /* Exit, the rest of the message is in a different protocol. */
           state = NEW_MESSAGE();
@@ -2128,12 +2130,6 @@ error:
 }
 
 
-const char * http_method_str (enum http_method m)
-{
-  return method_strings[m];
-}
-
-
 void
 http_parser_init (HttpParser *parser, enum http_parser_type t)
 {
@@ -2142,7 +2138,7 @@ http_parser_init (HttpParser *parser, enum http_parser_type t)
   parser->nread = 0;
   parser->upgrade = 0;
   parser->flags = 0;
-  parser->method = 0;
+  parser->method = HTTPRequestMethod::DELETE;
   parser->http_major = 0;
   parser->http_minor = 0;
   parser->http_errno = HPE_OK;
@@ -2335,15 +2331,8 @@ http_parser_parse_url(const char *buf, size_t buflen, int is_connect,
 
       case s_req_server_with_at:
         found_at = 1;
-        #if __cplusplus == 201703L
-          [[fallthrough]];
-        #elif defined(__GNUC__) || defined(__GNUG__)
-          __attribute__ ((fallthrough));
-        #elif defined(__clang__)
-          [[clang::fallthrough]];
-        #endif
 
-      /* FALLTROUGH */
+      /* FALLTHROUGH */
       case s_req_server:
         uf = UF_HOST;
         break;

@@ -7,11 +7,335 @@
 #define HTTPS_REMOTE_HOST_PTR (void*)0x2
 #define GET_FLAG(buffer) ((ServerToWorkerFlags)(((uint16_t*)(buffer))[0]))
 #define HTTP_HEADER_BUFFER_SIZE 8192
+#define UNUSED(x) (void)(x)
+
+static int on_message_begin(awsim::HttpRequest *request,
+    awsim::HttpParser *parser);
+static int on_url(awsim::HttpRequest *request, awsim::HttpParser *parser,
+    const char *at, size_t length);
+static int on_header_field(awsim::HttpRequest *request,
+    awsim::HttpParser *parser, const char *at, size_t length);
+static int on_header_value(awsim::HttpRequest *request,
+    awsim::HttpParser *parser, const char *at, size_t length);
+static int on_headers_complete(awsim::HttpRequest *request,
+    awsim::HttpParser *parser, const char *at, size_t length);
+static int on_body(awsim::HttpRequest *request, awsim::HttpParser *parser,
+    const char *at, size_t length);
+static int on_message_complete(awsim::HttpRequest *request,
+    awsim::HttpParser *parser);
+static int on_reason(awsim::HttpRequest *request, awsim::HttpParser *parser,
+    const char *at, size_t length);
+static int on_chunk_header(awsim::HttpRequest *request,
+    awsim::HttpParser *parser);
+static int on_chunk_complete(awsim::HttpRequest *request,
+    awsim::HttpParser *parser);
+awsim::HttpParserSettings awsim::Server::Worker::httpParserSettings =
+{
+    .on_message_begin = on_message_begin,
+    .on_url = on_url,
+    .on_header_field = on_header_field,
+    .on_header_value = on_header_value,
+    .on_headers_complete = on_headers_complete,
+    .on_body = on_body,
+    .on_message_complete = on_message_complete,
+    .on_reason = on_reason,
+    .on_chunk_header = on_chunk_header,
+    .on_chunk_complete = on_chunk_complete
+};
 
 static int create_epoll(int httpSocket, int serverReadfd);
 static void create_pipe(int *readfd, int *writefd);
 static ssize_t read_fd(int fd, void *buffer, size_t length);
 static void remove_fd_from_epoll(int fd, int epollfd);
+
+awsim::HttpRequest::Field httpRequestField;
+
+static int on_message_begin(awsim::HttpRequest *request,
+    awsim::HttpParser *parser)
+{
+    UNUSED(request);
+    UNUSED(parser);
+    return 0;
+}
+
+static int on_url(awsim::HttpRequest *request, awsim::HttpParser *parser,
+    const char *at, size_t length)
+{
+    UNUSED(parser);
+
+    request->url.buffer = at;
+    request->url.length = length;
+    return 0;
+}
+
+static int on_header_field(awsim::HttpRequest *request,
+    awsim::HttpParser *parser, const char *at, size_t length)
+{
+    const char *fieldString;
+
+    UNUSED(request);
+    UNUSED(parser);
+
+    httpRequestField = awsim::HttpRequest::Field::Unknown;
+    if (length > 0)
+    {
+        switch (at[0])
+        {
+            case 'H':
+                httpRequestField = awsim::HttpRequest::Field::Host;
+                break;
+            case 'A':
+                httpRequestField = awsim::HttpRequest::Field::Accept; // or maybe Accept-Language or Accept-Encoding
+                break;
+            case 'C':
+                httpRequestField = awsim::HttpRequest::Field::Connection;
+                break;
+            case 'U':
+                httpRequestField = awsim::HttpRequest::Field::UserAgent; // or maybe Upgrade-Insecure-Requests
+                break;
+        }
+    }
+
+    if (httpRequestField != awsim::HttpRequest::Field::Unknown)
+    {
+        fieldString = awsim::HttpRequest::fieldStrings[
+            (int)httpRequestField];
+        for (size_t i = 0; i < length; ++i)
+        {
+            char actual = at[i];
+            char desired = fieldString[i];
+
+            if (actual != desired)
+            {
+                if (httpRequestField == awsim::HttpRequest::Field::Accept)
+                {
+                    httpRequestField =
+                        awsim::HttpRequest::Field::AcceptEncoding;
+                    fieldString = awsim::HttpRequest::fieldStrings[
+                        (int)httpRequestField];
+                    --i;
+                }
+                else if (httpRequestField ==
+                    awsim::HttpRequest::Field::AcceptEncoding)
+                {
+                    httpRequestField =
+                        awsim::HttpRequest::Field::AcceptLanguage;
+                    fieldString = awsim::HttpRequest::fieldStrings[
+                        (int)httpRequestField];
+                    --i;
+                }
+                else if (httpRequestField ==
+                    awsim::HttpRequest::Field::UserAgent)
+                {
+                    httpRequestField =
+                        awsim::HttpRequest::Field::UpgradeInsecureRequests;
+                    fieldString = awsim::HttpRequest::fieldStrings[
+                        (int)httpRequestField];
+                    --i;
+                }
+                else
+                {
+                    httpRequestField = awsim::HttpRequest::Field::Unknown;
+                    break;
+                }
+            }
+            else if (i == length - 1 && fieldString[i + 1] != '\0')
+            {
+                httpRequestField = awsim::HttpRequest::Field::Unknown;
+                break;
+            }
+        }
+    }
+
+    #ifdef AWSIM_DEBUG
+        if (httpRequestField == awsim::HttpRequest::Field::Unknown)
+        {
+            syslog(LOG_DEBUG, "Unknown header field \"%.*s\"", (int)length, at);
+        }
+    #endif
+
+    return 0;
+}
+
+static int on_header_value(awsim::HttpRequest *request,
+    awsim::HttpParser *parser, const char *at, size_t length)
+{
+    UNUSED(parser);
+
+    switch (httpRequestField)
+    {
+        case awsim::HttpRequest::Field::Host:
+            request->host.buffer = at;
+            request->host.length = length;
+            request->host.set = true;
+            break;
+        case awsim::HttpRequest::Field::UserAgent:
+            request->userAgent.buffer = at;
+            request->userAgent.length = length;
+            request->userAgent.set = true;
+            break;
+        case awsim::HttpRequest::Field::Accept:
+            request->accept.buffer = at;
+            request->accept.length = length;
+            request->accept.set = true;
+            break;
+        case awsim::HttpRequest::Field::AcceptLanguage:
+            request->acceptLanguage.buffer = at;
+            request->acceptLanguage.length = length;
+            request->acceptLanguage.set = true;
+            break;
+        case awsim::HttpRequest::Field::AcceptEncoding:
+            request->acceptEncoding.buffer = at;
+            request->acceptEncoding.length = length;
+            request->acceptEncoding.set = true;
+            break;
+        case awsim::HttpRequest::Field::Connection:
+            request->connection.buffer = at;
+            request->connection.length = length;
+            request->connection.set = true;
+            break;
+        case awsim::HttpRequest::Field::UpgradeInsecureRequests:
+            request->upgradeInsecureRequests.buffer = at;
+            request->upgradeInsecureRequests.length = length;
+            request->upgradeInsecureRequests.set = true;
+            break;
+        case awsim::HttpRequest::Field::Unknown:
+        default:
+            syslog(LOG_WARNING, "Unknown header value \"%.*s\"", (int)length,
+                at);
+            break;
+    }
+
+    return 0;
+}
+
+static int on_headers_complete(awsim::HttpRequest *request,
+    awsim::HttpParser *parser, const char *at, size_t length)
+{
+    UNUSED(at);
+    UNUSED(length);
+
+    switch(parser->method)
+    {
+        case awsim::HTTPRequestMethod::GET:
+            request->method = awsim::HttpRequest::Method::GET;
+            break;
+        case awsim::HTTPRequestMethod::POST:
+            request->method = awsim::HttpRequest::Method::POST;
+            break;
+        case awsim::HTTPRequestMethod::HEAD:
+            request->method = awsim::HttpRequest::Method::HEAD;
+            break;
+        case awsim::HTTPRequestMethod::PUT:
+            request->method = awsim::HttpRequest::Method::PUT;
+            break;
+        case awsim::HTTPRequestMethod::CONNECT:
+            request->method = awsim::HttpRequest::Method::CONNECT;
+            break;
+        case awsim::HTTPRequestMethod::OPTIONS:
+            request->method = awsim::HttpRequest::Method::OPTIONS;
+            break;
+        case awsim::HTTPRequestMethod::TRACE:
+            request->method = awsim::HttpRequest::Method::TRACE;
+            break;
+        case awsim::HTTPRequestMethod::COPY:
+            request->method = awsim::HttpRequest::Method::COPY;
+            break;
+        case awsim::HTTPRequestMethod::LOCK:
+            request->method = awsim::HttpRequest::Method::LOCK;
+            break;
+        case awsim::HTTPRequestMethod::MKCOL:
+            request->method = awsim::HttpRequest::Method::MKCOL;
+            break;
+        case awsim::HTTPRequestMethod::MOVE:
+            request->method = awsim::HttpRequest::Method::MOVE;
+            break;
+        case awsim::HTTPRequestMethod::PROPFIND:
+            request->method = awsim::HttpRequest::Method::PROPFIND;
+            break;
+        case awsim::HTTPRequestMethod::PROPPATCH:
+            request->method = awsim::HttpRequest::Method::PROPPATCH;
+            break;
+        case awsim::HTTPRequestMethod::UNLOCK:
+            request->method = awsim::HttpRequest::Method::UNLOCK;
+            break;
+        case awsim::HTTPRequestMethod::REPORT:
+            request->method = awsim::HttpRequest::Method::REPORT;
+            break;
+        case awsim::HTTPRequestMethod::MKACTIVITY:
+            request->method = awsim::HttpRequest::Method::MKACTIVITY;
+            break;
+        case awsim::HTTPRequestMethod::CHECKOUT:
+            request->method = awsim::HttpRequest::Method::CHECKOUT;
+            break;
+        case awsim::HTTPRequestMethod::MERGE:
+            request->method = awsim::HttpRequest::Method::MERGE;
+            break;
+        case awsim::HTTPRequestMethod::MSEARCH:
+            request->method = awsim::HttpRequest::Method::MSEARCH;
+            break;
+        case awsim::HTTPRequestMethod::NOTIFY:
+            request->method = awsim::HttpRequest::Method::NOTIFY;
+            break;
+        case awsim::HTTPRequestMethod::SUBSCRIBE:
+            request->method = awsim::HttpRequest::Method::SUBSCRIBE;
+            break;
+        case awsim::HTTPRequestMethod::UNSUBSCRIBE:
+            request->method = awsim::HttpRequest::Method::UNSUBSCRIBE;
+            break;
+        case awsim::HTTPRequestMethod::PATCH:
+            request->method = awsim::HttpRequest::Method::PATCH;
+            break;
+        case awsim::HTTPRequestMethod::DELETE:
+            request->method = awsim::HttpRequest::Method::DELETE;
+            break;
+    }
+    return 0;
+}
+
+static int on_body(awsim::HttpRequest *request, awsim::HttpParser *parser,
+    const char *at, size_t length)
+{
+    UNUSED(request);
+    UNUSED(parser);
+    UNUSED(at);
+    UNUSED(length);
+    return 0;
+}
+
+static int on_message_complete(awsim::HttpRequest *request,
+    awsim::HttpParser *parser)
+{
+    UNUSED(request);
+    UNUSED(parser);
+    return 0;
+}
+
+static int on_reason(awsim::HttpRequest *request, awsim::HttpParser *parser,
+    const char *at, size_t length)
+{
+    UNUSED(request);
+    UNUSED(parser);
+    UNUSED(at);
+    UNUSED(length);
+    return 0;
+}
+
+static int on_chunk_header(awsim::HttpRequest *request,
+    awsim::HttpParser *parser)
+{
+    UNUSED(request);
+    UNUSED(parser);
+    return 0;
+}
+
+static int on_chunk_complete(awsim::HttpRequest *request,
+    awsim::HttpParser *parser)
+{
+    UNUSED(request);
+    UNUSED(parser);
+    return 0;
+}
 
 void awsim::Server::Worker::accept_http_client()
 {
@@ -88,8 +412,7 @@ void awsim::Server::Worker::add_http_client(int clientSocket)
         client->next->prev = client;
     }
     _numberOfClients++;
-    client->allocated = true;
-    client->sock = clientSocket;
+    client->init(clientSocket, false);
 }
 
 static int create_epoll(int httpSocket, int serverReadfd)
@@ -143,19 +466,21 @@ static void create_pipe(int *readfd, int *writefd)
 void awsim::Server::Worker::handle_client(Client *client)
 {
     char buffer[HTTP_HEADER_BUFFER_SIZE];
-    ssize_t size;
+    ssize_t length;
+    size_t nparsed;
+    HttpRequest request;
 
     #ifdef AWSIM_DEBUG
         syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Handling a client.", id);
     #endif
-    size = recv(client->sock, buffer, 1024, 0);
-    if (size == -1)
+    length = recv(client->sock, buffer, 1024, 0);
+    if (length == -1)
     {
         throw std::runtime_error("recv(" + std::to_string(client->sock)
             + ", buffer, " + std::to_string(sizeof(buffer)) + ", "
             + std::to_string(NO_FLAGS) + ") failed. " + strerror(errno));
     }
-    if (size == 0)
+    if (length == 0)
     {
         #ifdef AWSIM_DEBUG
             syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Client disconnected.", id);
@@ -164,7 +489,15 @@ void awsim::Server::Worker::handle_client(Client *client)
         return;
     }
 
-    syslog(LOG_DEBUG, "%s", buffer);
+    syslog(LOG_ALERT, "%s", buffer);
+    httpParser.data = client;
+    nparsed = http_parser_execute(&request, &httpParser,
+        &httpParserSettings, buffer, length);
+    if (nparsed != (size_t)length)
+    {
+        remove_client(client);
+        throw std::runtime_error("Failed to parse HTTP request");
+    }
 }
 
 void awsim::Server::Worker::handle_server_pipe()
@@ -516,6 +849,8 @@ void awsim::Server::Worker::routine_start(Worker &worker)
             "number of clients. %s", worker.id, ex.what());
         return;
     }
+
+    http_parser_init(&worker.httpParser, HTTP_REQUEST);
 
     try
     {

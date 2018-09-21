@@ -21,6 +21,8 @@ typedef unsigned __int64 uint64_t;
 #include <stdint.h>
 #endif
 
+#include "HttpRequest.h"
+
 namespace awsim {
 
 /* Compile with -DHTTP_PARSER_STRICT=1 to parse URLs and hostnames
@@ -43,7 +45,7 @@ namespace awsim {
 
 
 typedef struct HttpParser HttpParser;
-typedef struct http_parser_settings http_parser_settings;
+typedef struct HttpParserSettings HttpParserSettings;
 typedef struct http_parser_result http_parser_result;
 
 
@@ -60,42 +62,44 @@ typedef struct http_parser_result http_parser_result;
  * many times for each string. E.G. you might get 10 callbacks for "on_path"
  * each providing just a few characters more data.
  */
-typedef int (*http_data_cb) (HttpParser*, const char *at, size_t length);
-typedef int (*http_cb) (HttpParser*);
+typedef int (*http_data_cb) (HttpRequest*, HttpParser*,
+  const char *at, size_t length);
+typedef int (*http_cb) (HttpRequest*, HttpParser*);
 
 
 /* Request Methods */
-enum http_method
-  { HTTP_DELETE    = 0
-  , HTTP_GET
-  , HTTP_HEAD
-  , HTTP_POST
-  , HTTP_PUT
+enum class HTTPRequestMethod
+{
+  DELETE = 0,
+  GET = 1,
+  HEAD = 2,
+  POST = 3,
+  PUT = 4,
   /* pathological */
-  , HTTP_CONNECT
-  , HTTP_OPTIONS
-  , HTTP_TRACE
+  CONNECT = 5,
+  OPTIONS = 6,
+  TRACE = 7,
   /* webdav */
-  , HTTP_COPY
-  , HTTP_LOCK
-  , HTTP_MKCOL
-  , HTTP_MOVE
-  , HTTP_PROPFIND
-  , HTTP_PROPPATCH
-  , HTTP_UNLOCK
+  COPY = 8,
+  LOCK =  9,
+  MKCOL = 10,
+  MOVE = 11,
+  PROPFIND = 12,
+  PROPPATCH = 13,
+  UNLOCK = 14,
   /* subversion */
-  , HTTP_REPORT
-  , HTTP_MKACTIVITY
-  , HTTP_CHECKOUT
-  , HTTP_MERGE
+  REPORT = 15,
+  MKACTIVITY = 16,
+  CHECKOUT = 17,
+  MERGE = 18,
   /* upnp */
-  , HTTP_MSEARCH
-  , HTTP_NOTIFY
-  , HTTP_SUBSCRIBE
-  , HTTP_UNSUBSCRIBE
+  MSEARCH = 19,
+  NOTIFY = 20,
+  SUBSCRIBE = 21,
+  UNSUBSCRIBE = 22,
   /* RFC-5789 */
-  , HTTP_PATCH
-  };
+  PATCH = 23
+};
 
 
 enum http_parser_type { HTTP_REQUEST, HTTP_RESPONSE, HTTP_BOTH };
@@ -203,7 +207,7 @@ struct HttpParser {
   unsigned short http_major;
   unsigned short http_minor;
   unsigned short status_code; /* responses only */
-  unsigned char method;       /* requests only */
+  HTTPRequestMethod method;       /* requests only */
   unsigned char http_errno : 7;
 
   /* 1 = Upgrade header was present and the parser has exited because of that.
@@ -222,7 +226,7 @@ struct HttpParser {
 };
 
 
-struct http_parser_settings {
+struct HttpParserSettings {
   http_cb      on_message_begin;
   http_data_cb on_url;
   http_data_cb on_header_field;
@@ -272,13 +276,11 @@ struct http_parser_url {
 void http_parser_init(HttpParser *parser, enum http_parser_type type);
 
 
-size_t http_parser_execute(HttpParser *parser,
-                           const http_parser_settings *settings,
+size_t http_parser_execute(HttpRequest *request,
+                           HttpParser *parser,
+                           const HttpParserSettings *settings,
                            const char *data,
                            size_t len);
-
-/* Returns a string version of the HTTP method. */
-const char *http_method_str(enum http_method m);
 
 /* Return a string name of the given error */
 const char *http_errno_name(enum http_errno err);
