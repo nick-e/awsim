@@ -62,9 +62,27 @@ static int on_url(awsim::HttpRequest *request, awsim::HttpParser *parser,
     const char *at, size_t length)
 {
     UNUSED(parser);
+    bool foundPeriod = false;
 
     request->url.buffer = at;
     request->url.length = length;
+
+    for (size_t i = 0; i < length; ++i)
+    {
+        if (at[i] == '.')
+        {
+            if (foundPeriod)
+            {
+                return -1;
+            }
+            foundPeriod = true;
+        }
+        else
+        {
+            foundPeriod = false;
+        }
+    }
+
     return 0;
 }
 
@@ -489,7 +507,6 @@ void awsim::Server::Worker::handle_client(Client *client)
         return;
     }
 
-    syslog(LOG_ALERT, "%s", buffer);
     httpParser.data = client;
     nparsed = http_parser_execute(&request, &httpParser,
         &httpParserSettings, buffer, length);
@@ -498,6 +515,8 @@ void awsim::Server::Worker::handle_client(Client *client)
         remove_client(client);
         throw std::runtime_error("Failed to parse HTTP request");
     }
+
+    
 }
 
 void awsim::Server::Worker::handle_server_pipe()

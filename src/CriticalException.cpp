@@ -1,6 +1,6 @@
-#include "Server.h"
+#include "CriticalException.h"
 
-awsim::Server::Worker::CriticalException::CriticalException(
+awsim::CriticalException::CriticalException(
     const std::string &message) :
     std::runtime_error(message)
 {

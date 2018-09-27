@@ -1,6 +1,6 @@
-#include "Server.h"
+#include "Client.h"
 
-void awsim::Server::Worker::Client::init(int clientSocket, bool https)
+void awsim::Client::init(int clientSocket, bool https)
 {
    this->https = https;
    this->sock = clientSocket;

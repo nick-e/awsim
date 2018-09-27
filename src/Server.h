@@ -6,11 +6,13 @@
 #include <errno.h>
 #include <fstream>
 #include <iostream>
+#include <limits.h>
 #include <list>
 #include <math.h>
 #include <netdb.h>
 #include <pwd.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string>
 #include <string.h>
 #include <sys/epoll.h>
@@ -23,6 +25,7 @@
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#include <vector>
 
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -32,6 +35,10 @@
 #include "defaults.h"
 #include "HttpParser.h"
 #include "HttpRequest.h"
+#include "Client.h"
+#include "Config.h"
+#include "Domain.h"
+#include "CriticalException.h"
 
 #define AF_FAMILY_TO_STR(a) ((a) == AF_INET ? "AF_INET" : (a) == AF_INET6 \
     ? "AF_INET6" : (a) == AF_UNIX ? "AF_UNIX" : "UNKNOWN")
@@ -49,26 +56,12 @@ namespace awsim
         static const std::string CONFIG_FILE_PATH;
         static const uint64_t CONSOLE_BACKLOG = 32;
         static const uint64_t CONSOLE_BUFFER_SIZE = 1024;
-        static const uint64_t MAX_ROOT_DIRECTORY_LENGTH = 1024;
         static const uint64_t NUMBER_OF_EPOLL_EVENTS = 64;
         static const uint64_t INTERNET_BACKLOG = 1024;
 
         static void init();
 
     private:
-        struct Config
-        {
-            uint16_t httpPort;
-            uint16_t httpsPort;
-            uint64_t numberOfWorkers;
-            bool dynamicNumberOfWorkers;
-            uint64_t staticNumberOfWorkers;
-            double percentOfCoresForWorkers;
-            char rootDirectory[MAX_ROOT_DIRECTORY_LENGTH + 1];
-
-            Config(const std::string &fileName);
-        };
-
         class Worker
         {
             public:
@@ -101,25 +94,6 @@ namespace awsim
                 ~Worker();
 
             private:
-                class CriticalException : public std::runtime_error
-                {
-                public:
-                    CriticalException(const std::string &message);
-                };
-
-                class Client
-                {
-                public:
-                    bool allocated;
-                    bool https;
-                    int sock;
-
-                    void init(int clientSocket, bool https);
-
-                    Client *next;
-                    Client *prev;
-                };
-
                 // Used by worker thread
                 Client *clientHeap;
                 Client *allocatedList;
@@ -170,7 +144,6 @@ namespace awsim
         static uint64_t numberOfWorkers;
         static double percentOfCoresForWorkers;
         static bool quit;
-        static char rootDirectory[MAX_ROOT_DIRECTORY_LENGTH + 1];
         static int signalsfd;
         static uint64_t staticNumberOfWorkers;
         static std::unordered_map<uint64_t, Worker> workers;

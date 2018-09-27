@@ -9,10 +9,16 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Og -g -Werror -Wall -Wextra
 set(CMAKE_CXX_FLAGS_RELEASE, "${CMAKE_CXX_FLAGS_RELEASE} -Ofast -Werror -Wall -Wextra")
 set(CMAKE_CXX_COMPILER, clang++)
 
+add_library(dynapages SHARED
+    ${SRC_DIR}/Client.cpp
+    ${SRC_DIR}/HttpRequest.cpp)
+
 find_package(Threads)
 add_executable(awsimd
     ${SRC_DIR}/awsimd.cpp
     ${SRC_DIR}/Server.cpp
+    ${SRC_DIR}/Domain.cpp
+    ${SRC_DIR}/Config.cpp
     ${SRC_DIR}/Worker.cpp
     ${SRC_DIR}/Client.cpp
     ${SRC_DIR}/CriticalException.cpp

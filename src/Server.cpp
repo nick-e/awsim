@@ -22,8 +22,7 @@ std::unordered_map<uint64_t, awsim::Server::Worker> awsim::Server::workers;
 int awsim::Server::workersReadfd = -1;
 int awsim::Server::workersWritefd = -1;
 
-static void change_directory(const std::string &directory);
-static void create_config_file(const std::string &configFilePath);
+//static void change_directory(const std::string &directory);
 static int create_epoll(int consoleSocket, int signalsfd,
     int workersReadfd);
 static int create_remote_host_internet_socket(sockaddr_storage *address,
@@ -32,19 +31,8 @@ static int create_remote_host_unix_socket(const std::string &path);
 static int create_signal_fd();
 static void create_worker_pipe(int *readfd, int *writefd);
 static void delete_fd_from_epoll(int epollfd, int fd);
-static FILE* get_config_file(const std::string &filePath);
 static ssize_t get_message_from_console(int epollfd, int consoleSocket,
     char *buffer);
-static void json_check_existance(rapidjson::Document &document,
-    const std::string name);
-static bool json_get_bool(rapidjson::Value &value);
-static double json_get_double(rapidjson::Value &value);
-static const char* json_get_string(rapidjson::Value &value);
-static uint16_t json_get_uint16(rapidjson::Value &value);
-static uint64_t json_get_uint64(rapidjson::Value &value);
-//static std::string json_value_to_string(const rapidjson::Value &value);
-static void parse_json_file(FILE *fp, rapidjson::Document &document, char *buf,
-    size_t buflen);
 static ssize_t read_fd(int fd, void *buffer, size_t length);
 static std::string signo_to_string(uint32_t signal);
 
@@ -74,7 +62,7 @@ void awsim::Server::add_worker()
     nextWorkerID++;
 }
 
-static void change_directory(const std::string &directory)
+/*static void change_directory(const std::string &directory)
 {
     if (access(directory.c_str(), F_OK) == -1)
     {
@@ -94,165 +82,7 @@ static void change_directory(const std::string &directory)
         throw std::runtime_error("chdir(\"" + directory
             + "\") failed. " + strerror(errno) + ".");
     }
-}
-
-awsim::Server::Config::Config(const std::string &filePath)
-{
-    FILE *fp;;
-    char buf[2048];
-    rapidjson::Document document;
-    const char *tmp;
-
-    try
-    {
-        fp = get_config_file(filePath);
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error("Failed to get config file \"" + filePath
-            + "\". " + ex.what());
-    }
-
-    try
-    {
-        parse_json_file(fp, document, buf, sizeof(buf));
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error("Failed to parse config file at \""
-            + filePath + "\". "
-            + ex.what());
-    }
-
-    try
-    {
-        json_check_existance(document, "console socket path");
-        consoleSocketPath = json_get_string(document["console socket path"]);
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error(std::string("Failed to get \"console socket "
-            "path\" from config file. ")
-            + ex.what());
-    }
-
-    try
-    {
-        json_check_existance(document, "http port");
-        httpPort = json_get_uint16(document["http port"]);
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error(
-            std::string("Failed to get \"http port\" from config file. ")
-            + ex.what());
-    }
-
-    try
-    {
-        json_check_existance(document, "https port");
-        httpsPort = json_get_uint16(document["https port"]);
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error(
-            std::string("Failed to get \"https port\" from config file. ")
-            + ex.what());
-    }
-
-    try
-    {
-        json_check_existance(document, "root directory");
-        tmp = json_get_string(document["root directory"]);
-        strcpy(rootDirectory, tmp);
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error(
-            std::string("Failed to get \"root directory\" from config file. ")
-            + ex.what());
-    }
-
-    try
-    {
-        json_check_existance(document, "dynamic number of workers");
-        dynamicNumberOfWorkers = json_get_bool(
-            document["dynamic number of workers"]);
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error(std::string("Failed to get \"dynamic number "
-            "of workers\" from config file. ") + ex.what());
-    }
-
-    try
-    {
-        json_check_existance(document, "percent of cores as workers");
-        percentOfCoresForWorkers = json_get_double(
-            document["percent of cores as workers"]);
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error(std::string("Failed to get \"percent of cores "
-            "as workers\" from config file. ") + ex.what());
-    }
-    if (percentOfCoresForWorkers <= 0)
-    {
-        throw std::runtime_error("\"static number of workers\" must be a "
-            "number greater than 0, currently set to \""
-            + std::to_string(numberOfWorkers) + "\"");
-    }
-
-    try
-    {
-        json_check_existance(document, "static number of workers");
-        staticNumberOfWorkers = json_get_uint64(
-            document["static number of workers"]);
-    }
-        catch (const std::exception &ex)
-    {
-        throw std::runtime_error(std::string("Failed to get \"static number of "
-            "workers\" from config file. ") + ex.what());
-    }
-    if (staticNumberOfWorkers < 1)
-    {
-        throw std::runtime_error("\"static number of workers\" must be an "
-            "integer greater than or equal to 1, currently set to \""
-            + std::to_string(numberOfWorkers) + "\"");
-    }
-
-    fclose(fp);
-}
-
-static void create_config_file(const std::string &configFilePath)
-{
-    std::ofstream stream(configFilePath);
-
-    if (!stream)
-    {
-        throw std::runtime_error(std::string("Failed to create ofstream. ")
-            + strerror(errno));
-    }
-
-    stream << "{" << std::endl
-        << "    \"console socket path\": \""
-            << AWSIM_DEFAULT_CONSOLE_SOCKET_PATH << "\", " << std::endl
-        << "    \"http port\": " << AWSIM_DEFAULT_HTTP_PORT_NUMBER << ", "
-            << std::endl
-        << "    \"https port\": " << AWSIM_DEFAULT_HTTPS_PORT_NUMBER << ", "
-            << std::endl
-        << "    \"root directory\": \"" << AWSIM_DEFAULT_ROOT_DIRECTORY
-            << "\"," << std::endl
-        << "    \"dynamic number of workers\": "
-            << (AWSIM_DEFAULT_DYNAMIC_NUMBER_OF_WORKERS ? "true" : "false")
-            << "," << std::endl
-        << "    \"percent of cores as workers\": "
-            << AWSIM_DEFAULT_PERCENT_OF_CORES_AS_WORKERS << "," << std::endl
-        << "    \"static number of workers\": "
-            << AWSIM_DEFAULT_STATIC_NUMBER_OF_WORKERS << std::endl
-        << "}" << std::endl;
-    stream.close();
-}
+}*/
 
 static int create_epoll(int consoleSocket, int signalsfd,
     int workersReadfd)
@@ -485,7 +315,6 @@ static void delete_fd_from_epoll(int epollfd, int fd)
     }
 }
 
-
 void awsim::Server::end()
 {
     syslog(LOG_INFO, "Ending.");
@@ -500,34 +329,6 @@ void awsim::Server::end()
 void awsim::Server::end_workers()
 {
     workers.clear();
-}
-
-static FILE* get_config_file(const std::string &filePath)
-{
-    FILE *fp;
-    if (access(filePath.c_str(), F_OK) == -1)
-    {
-        syslog(LOG_NOTICE,
-            "No config file exists at \"%s\", creating a new one at \"%s\".",
-            filePath.c_str(), filePath.c_str());
-        try
-        {
-            create_config_file(filePath);
-        }
-        catch (const std::exception &ex)
-        {
-            throw std::runtime_error("Failed to create a config file at \""
-                + filePath + "\". " + ex.what() + ".");
-        }
-    }
-    fp = fopen(filePath.c_str(), "r");
-    if (fp == nullptr)
-    {
-        throw std::runtime_error("fopen(\"" + filePath + "\", \"r\") failed. "
-            + strerror(errno) + ".");
-    }
-
-    return fp;
 }
 
 static ssize_t get_message_from_console(int epollfd, int consoleSocket,
@@ -724,140 +525,6 @@ void awsim::Server::init()
     loop();
 }
 
-static void json_check_existance(rapidjson::Document &document,
-    const std::string name)
-{
-    if (!document.HasMember(name.c_str()))
-    {
-        throw std::runtime_error("\"" + name + "\" does not exist.");
-    }
-}
-
-static bool json_get_bool(rapidjson::Value &value)
-{
-    if (value.IsNull())
-    {
-        throw std::runtime_error("Value not found.");
-    }
-
-    if (!value.IsBool())
-    {
-        throw std::runtime_error("Value not a bool.");
-    }
-
-    return value.GetBool();
-}
-
-static double json_get_double(rapidjson::Value &value)
-{
-    if (value.IsNull())
-    {
-        throw std::runtime_error("Value not found.");
-    }
-
-    if (!value.IsNumber())
-    {
-        throw std::runtime_error("Value not a number.");
-    }
-
-    return value.GetDouble();
-}
-
-static const char* json_get_string(rapidjson::Value &value)
-{
-    if (value.IsNull())
-    {
-        throw std::runtime_error("Value not found.");
-    }
-
-    if (!value.IsString())
-    {
-        throw std::runtime_error("Value not a string.");
-    }
-
-    return value.GetString();
-}
-
-static uint16_t json_get_uint16(rapidjson::Value &value)
-{
-    uint64_t tmp;
-
-    if (value.IsNull())
-    {
-        throw std::runtime_error("Value not found.");
-    }
-
-    if (!value.IsUint())
-    {
-        throw std::runtime_error("Value not an unsigned 16 bit integer.");
-    }
-
-    tmp = value.GetUint();
-    if (tmp > 65535)
-    {
-        throw std::runtime_error("Value not an unsigned 16 bit integer.");
-    }
-
-    return (uint16_t)tmp;
-}
-
-static uint64_t json_get_uint64(rapidjson::Value &value)
-{
-
-    if (value.IsNull())
-    {
-        throw std::runtime_error("Value not found.");
-    }
-
-    if (!value.IsUint())
-    {
-        throw std::runtime_error("Value not an unsigned 64 bit integer.");
-    }
-
-    return value.GetUint();
-}
-
-/*static std::string json_value_to_string(const rapidjson::Value &value)
-{
-    if (value.IsBool())
-    {
-        return std::to_string(value.GetBool());
-    }
-    if (value.IsDouble())
-    {
-        return std::to_string(value.GetDouble());
-    }
-    if (value.IsFloat())
-    {
-        return std::to_string(value.GetFloat());
-    }
-    if (value.IsInt())
-    {
-        return std::to_string(value.GetInt());
-    }
-    if (value.IsInt64())
-    {
-        return std::to_string(value.GetInt64());
-    }
-    if (value.IsNull())
-    {
-        return "NULL";
-    }
-    if (value.IsString())
-    {
-        return value.GetString();
-    }
-    if (value.IsUint())
-    {
-        return std::to_string(value.GetUint());
-    }
-    if (value.IsUint64())
-    {
-        return std::to_string(value.GetUint64());
-    }
-    return "empty";
-}*/
-
 void awsim::Server::loop()
 {
     epoll_event events[NUMBER_OF_EPOLL_EVENTS];
@@ -937,20 +604,6 @@ void awsim::Server::loop()
     }
 }
 
-static void parse_json_file(FILE *fp, rapidjson::Document &document, char *buf,
-    size_t buflen)
-{
-    rapidjson::ParseResult parseResult;
-
-    rapidjson::FileReadStream stream(fp, buf, buflen);
-    parseResult = document.ParseStream(stream);
-    if (!parseResult)
-    {
-        throw std::runtime_error(std::string("ParseStream(stream) failed. ")
-            + rapidjson::GetParseError_En(parseResult.Code()));
-    }
-}
-
 static ssize_t read_fd(int fd, void *buffer, size_t length)
 {
     ssize_t result;
@@ -1001,7 +654,7 @@ void awsim::Server::start()
     dynamicNumberOfWorkers = config.dynamicNumberOfWorkers;
     percentOfCoresForWorkers = config.percentOfCoresForWorkers;
 
-    try
+    /*try
     {
         change_directory(config.rootDirectory);
     }
@@ -1009,7 +662,7 @@ void awsim::Server::start()
     {
         throw std::runtime_error(std::string("Failed to change directories. ")
             + ex.what());
-    }
+    }*/
 
     try
     {
