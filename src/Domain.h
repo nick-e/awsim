@@ -19,25 +19,26 @@ namespace awsim
         const std::string name;
         const std::string rootDirectory;
 
-        Domain(const std::string &name, const std::string &rootDirectory,
-            const Config::Domain &domain);
+        Domain(const Config::Domain &domain);
 
         DynamicPage get_dynamic_page(const std::string &url);
 
     private:
         struct Triple;
-        typedef std::unordered_map<std::string, Triple*> DynamicPageMap;
+        typedef std::unordered_map<std::string, Triple> DynamicPageMap;
         struct Triple
         {
             DynamicPage dynamicPage;
             void *lib;
-            DynamicPageMap nextMap;
+            DynamicPageMap *nextMap;
 
             Triple(DynamicPage dynamicPage, void *lib);
             ~Triple();
         };
 
         DynamicPageMap dynamicPages;
+
+        void insert_dynamic_page(void *lib);
     };
 }
 

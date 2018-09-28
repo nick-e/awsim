@@ -136,6 +136,7 @@ namespace awsim
         static sockaddr_storage address;
         static int consoleSocket;
         static std::string consoleSocketPath;
+        static std::unordered_map<std::string, Domain> domains;
         static bool dynamicNumberOfWorkers;
         static int epollfd;
         static int httpSocket;

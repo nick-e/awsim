@@ -26,4 +26,6 @@ add_executable(awsimd
     ${SRC_DIR}/HttpRequest.cpp
     ${SRC_DIR}/flags.cpp)
 target_include_directories(awsimd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includes)
-target_link_libraries(awsimd ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(awsimd
+    ${CMAKE_THREAD_LIBS_INIT}
+    ${CMAKE_DL_LIBS})

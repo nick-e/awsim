@@ -420,8 +420,8 @@ static void parse_domains(rapidjson::Document &document,
 
         try
         {
-            json_check_existance(domain, name);
-            name = json_get_string(domain[name.c_str()]);
+            json_check_existance(domain, "name");
+            name = json_get_string(domain["name"]);
         }
         catch (const std::exception &ex)
         {

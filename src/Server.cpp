@@ -7,8 +7,9 @@ const std::string awsim::Server::CONFIG_FILE_PATH = "/etc/awsimd.conf";
 sockaddr_storage awsim::Server::address;
 int awsim::Server::epollfd = -1;
 int awsim::Server::consoleSocket = -1;
-bool awsim::Server::dynamicNumberOfWorkers;
 std::string awsim::Server::consoleSocketPath = "";
+std::unordered_map<std::string, awsim::Domain> awsim::Server::domains;
+bool awsim::Server::dynamicNumberOfWorkers;
 int awsim::Server::httpSocket = -1;
 uint64_t awsim::Server::nextWorkerID = 0;
 uint64_t awsim::Server::numberOfConnectedConsoles;
@@ -323,6 +324,7 @@ void awsim::Server::end()
     close(consoleSocket);
     close(epollfd);
     unlink(consoleSocketPath.c_str());
+    domains.clear();
     syslog(LOG_INFO, "Ended.");
 }
 
@@ -488,8 +490,6 @@ void awsim::Server::handle_workers()
 
 void awsim::Server::init()
 {
-    start();
-
     try
     {
         create_worker_pipe(&workersReadfd, &workersWritefd);
@@ -513,6 +513,17 @@ void awsim::Server::init()
 
     try
     {
+        consoleSocket = create_remote_host_unix_socket(consoleSocketPath);
+    }
+    catch (const std::exception &ex)
+    {
+        throw std::runtime_error(
+            std::string("Failed to create console listening socket. ")
+            + ex.what());
+    }
+
+    try
+    {
         epollfd = create_epoll(consoleSocket, signalsfd, workersReadfd);
     }
     catch (const std::exception &ex)
@@ -522,6 +533,7 @@ void awsim::Server::init()
             + ex.what());
     }
 
+    start();
     loop();
 }
 
@@ -664,6 +676,13 @@ void awsim::Server::start()
             + ex.what());
     }*/
 
+    for (Config::Domain &domain : config.domains)
+    {
+        domains.emplace(std::piecewise_construct,
+            std::forward_as_tuple(domain.name),
+            std::forward_as_tuple(domain));
+    }
+
     try
     {
         httpSocket = create_remote_host_internet_socket(&address,
@@ -672,18 +691,6 @@ void awsim::Server::start()
     catch (const std::exception &ex)
     {
         throw std::runtime_error(std::string("Failed to create http socket. ")
-            + ex.what());
-    }
-
-    try
-    {
-        consoleSocket = create_remote_host_unix_socket(
-            consoleSocketPath);
-    }
-    catch (const std::exception &ex)
-    {
-        throw std::runtime_error(
-            std::string("Failed to create console listening socket. ")
             + ex.what());
     }
 
@@ -732,6 +739,7 @@ void awsim::Server::stop()
 {
     syslog(LOG_INFO, "Stopping.");
     end_workers();
+    domains.clear();
     close(httpSocket);
 }
 
