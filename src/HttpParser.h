@@ -21,6 +21,11 @@ typedef unsigned __int64 uint64_t;
 #include <stdint.h>
 #endif
 
+#include <unordered_map>
+
+#include "Domain.h"
+#include "DynamicPage.h"
+#include "ParserDetails.h"
 #include "HttpRequest.h"
 
 namespace awsim {
@@ -46,6 +51,7 @@ namespace awsim {
 
 typedef struct HttpParser HttpParser;
 typedef struct HttpParserSettings HttpParserSettings;
+typedef struct ParserDetails ParserDetails;
 typedef struct http_parser_result http_parser_result;
 
 
@@ -62,9 +68,9 @@ typedef struct http_parser_result http_parser_result;
  * many times for each string. E.G. you might get 10 callbacks for "on_path"
  * each providing just a few characters more data.
  */
-typedef int (*http_data_cb) (HttpRequest*, HttpParser*,
+typedef int (*http_data_cb) (HttpRequest*, ParserDetails*, HttpParser*,
   const char *at, size_t length);
-typedef int (*http_cb) (HttpRequest*, HttpParser*);
+typedef int (*http_cb) (HttpRequest*, ParserDetails*, HttpParser*);
 
 
 /* Request Methods */
@@ -191,7 +197,6 @@ enum http_errno {
 #define HTTP_PARSER_ERRNO_LINE(p)       0
 #endif
 
-
 struct HttpParser {
   /** PRIVATE **/
   unsigned char type : 2;     /* enum http_parser_type */
@@ -277,6 +282,7 @@ void http_parser_init(HttpParser *parser, enum http_parser_type type);
 
 
 size_t http_parser_execute(HttpRequest *request,
+                           ParserDetails *details,
                            HttpParser *parser,
                            const HttpParserSettings *settings,
                            const char *data,

@@ -26,17 +26,17 @@ int main()
         sid = setsid();
         if (sid < 0)
         {
-            syslog(LOG_EMERG, "setsid() failed. %s\n", strerror(errno));
+            syslog(LOG_EMERG, "setsid() failed -> %s\n", strerror(errno));
             closelog();
             return EXIT_FAILURE;
         }
         try
         {
-            awsim::Server::init();
+            awsim::Server server;
         }
         catch (const std::exception &ex)
         {
-            syslog(LOG_EMERG, "Crashed. %s", ex.what());
+            syslog(LOG_EMERG, "Crashed -> %s", ex.what());
             closelog();
             return EXIT_FAILURE;
         }

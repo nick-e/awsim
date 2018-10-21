@@ -32,7 +32,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error("Failed to get config file \"" + filePath
-            + "\". " + ex.what());
+            + "\"-> " + ex.what());
     }
 
     try
@@ -42,8 +42,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error("Failed to parse config file at \""
-            + filePath + "\". "
-            + ex.what());
+            + filePath + "\"-> " + ex.what());
     }
 
     try
@@ -54,8 +53,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(std::string("Failed to get \"console socket "
-            "path\" from config file. ")
-            + ex.what());
+            "path\" from config file -> ") + ex.what());
     }
 
     try
@@ -65,7 +63,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Failed to parse domains from config file. ")
+            std::string("Failed to parse domains from config file -> ")
             + ex.what());
     }
 
@@ -77,7 +75,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Failed to get \"http port\" from config file. ")
+            std::string("Failed to get \"http port\" from config file -> ")
             + ex.what());
     }
 
@@ -89,7 +87,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Failed to get \"https port\" from config file. ")
+            std::string("Failed to get \"https port\" from config file -> ")
             + ex.what());
     }
 
@@ -102,7 +100,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(std::string("Failed to get \"localhost "
-            "domain name\" from config file. ") + ex.what());
+            "domain name\" from config file -> ") + ex.what());
     }
 
     try
@@ -114,7 +112,19 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(std::string("Failed to get \"dynamic number "
-            "of workers\" from config file. ") + ex.what());
+            "of workers\" from config file -> ") + ex.what());
+    }
+
+    try
+    {
+        json_check_existance(document, "minimum size of large files");
+        minimumSizeOfLargeFiles = json_get_uint64(
+            document["minimum size of large files"]);
+    }
+    catch (const std::exception &ex)
+    {
+        throw std::runtime_error(std::string("Failed to get \"minimum size of "
+            "large files\" from config file -> ") + ex.what());
     }
 
     try
@@ -126,7 +136,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(std::string("Failed to get \"percent of cores "
-            "as workers\" from config file. ") + ex.what());
+            "as workers\" from config file -> ") + ex.what());
     }
     if (percentOfCoresForWorkers <= 0)
     {
@@ -144,7 +154,7 @@ awsim::Config::Config(const std::string &filePath)
         catch (const std::exception &ex)
     {
         throw std::runtime_error(std::string("Failed to get \"static number of "
-            "workers\" from config file. ") + ex.what());
+            "workers\" from config file -> ") + ex.what());
     }
     if (staticNumberOfWorkers < 1)
     {
@@ -183,6 +193,8 @@ static void create_config_file(const std::string &configFilePath)
         << "   \"dynamic number of workers\": "
             << (AWSIM_DEFAULT_DYNAMIC_NUMBER_OF_WORKERS ? "true" : "false")
             << "," << std::endl
+        << "   \"minimum size of large files\": "
+            << AWSIM_DEFAULT_MINIMUM_SIZE_OF_LARGE_FILES << ", " << std::endl
         << "   \"percent of cores as workers\": "
             << AWSIM_DEFAULT_PERCENT_OF_CORES_AS_WORKERS << "," << std::endl
         << "   \"static number of workers\": "
@@ -197,7 +209,7 @@ static FILE* get_config_file(const std::string &filePath)
     if (access(filePath.c_str(), F_OK) == -1)
     {
         syslog(LOG_NOTICE,
-            "No config file exists at \"%s\", creating a new one at \"%s\".",
+            "No config file exists at \"%s\", creating a new one at \"%s\"",
             filePath.c_str(), filePath.c_str());
         try
         {
@@ -206,14 +218,14 @@ static FILE* get_config_file(const std::string &filePath)
         catch (const std::exception &ex)
         {
             throw std::runtime_error("Failed to create a config file at \""
-                + filePath + "\". " + ex.what() + ".");
+                + filePath + "\" -> " + ex.what() + ".");
         }
     }
     fp = fopen(filePath.c_str(), "r");
     if (fp == nullptr)
     {
         throw std::runtime_error("fopen(\"" + filePath
-            + "\", \"r\") failed. " + strerror(errno) + ".");
+            + "\", \"r\") failed -> " + strerror(errno));
     }
 
     return fp;
@@ -233,7 +245,7 @@ static void json_check_existance(rapidjson::Document &document,
 {
     if (!document.HasMember(name.c_str()))
     {
-        throw std::runtime_error("\"" + name + "\" does not exist.");
+        throw std::runtime_error("\"" + name + "\" does not exist");
     }
 }
 
@@ -242,7 +254,7 @@ static void json_check_existance(rapidjson::Value &value,
 {
     if (!value.HasMember(name.c_str()))
     {
-        throw std::runtime_error("\"" + name + "\" does not exist.");
+        throw std::runtime_error("\"" + name + "\" does not exist");
     }
 }
 
@@ -250,12 +262,12 @@ static bool json_get_bool(rapidjson::Value &value)
 {
     if (value.IsNull())
     {
-        throw std::runtime_error("Value not found.");
+        throw std::runtime_error("Value not found");
     }
 
     if (!value.IsBool())
     {
-        throw std::runtime_error("Value not a bool.");
+        throw std::runtime_error("Value not a bool");
     }
 
     return value.GetBool();
@@ -265,12 +277,12 @@ static double json_get_double(rapidjson::Value &value)
 {
     if (value.IsNull())
     {
-        throw std::runtime_error("Value not found.");
+        throw std::runtime_error("Value not found");
     }
 
     if (!value.IsNumber())
     {
-        throw std::runtime_error("Value not a number.");
+        throw std::runtime_error("Value not a number");
     }
 
     return value.GetDouble();
@@ -280,12 +292,12 @@ static const char* json_get_string(rapidjson::Value &value)
 {
     if (value.IsNull())
     {
-        throw std::runtime_error("Value not found.");
+        throw std::runtime_error("Value not found");
     }
 
     if (!value.IsString())
     {
-        throw std::runtime_error("Value not a string.");
+        throw std::runtime_error("Value not a string");
     }
 
     return value.GetString();
@@ -299,7 +311,7 @@ static void json_get_string_array(rapidjson::Value &parent,
     rapidjson::Value &tmp = parent[name.c_str()];
     if (!tmp.IsArray())
     {
-        throw std::runtime_error("\"" + name + "\" is not an array.");
+        throw std::runtime_error("\"" + name + "\" is not an array");
     }
     size_t index = 0;
     for (auto it = tmp.Begin(); it != tmp.End(); ++it, ++index)
@@ -311,7 +323,7 @@ static void json_get_string_array(rapidjson::Value &parent,
         catch (const std::exception &ex)
         {
             throw std::runtime_error("Failed to get string at index "
-                + std::to_string(index) + ". " + ex.what());
+                + std::to_string(index) + " -> " + ex.what());
         }
     }
 }
@@ -322,18 +334,18 @@ static uint16_t json_get_uint16(rapidjson::Value &value)
 
     if (value.IsNull())
     {
-        throw std::runtime_error("Value not found.");
+        throw std::runtime_error("Value not found");
     }
 
     if (!value.IsUint())
     {
-        throw std::runtime_error("Value not an unsigned 16 bit integer.");
+        throw std::runtime_error("Value not an unsigned 16 bit integer");
     }
 
     tmp = value.GetUint();
     if (tmp > 65535)
     {
-        throw std::runtime_error("Value not an unsigned 16 bit integer.");
+        throw std::runtime_error("Value not an unsigned 16 bit integer");
     }
 
     return (uint16_t)tmp;
@@ -344,12 +356,12 @@ static uint64_t json_get_uint64(rapidjson::Value &value)
 
     if (value.IsNull())
     {
-        throw std::runtime_error("Value not found.");
+        throw std::runtime_error("Value not found");
     }
 
     if (!value.IsUint())
     {
-        throw std::runtime_error("Value not an unsigned 64 bit integer.");
+        throw std::runtime_error("Value not an unsigned 64 bit integer");
     }
 
     return value.GetUint();
@@ -408,7 +420,7 @@ static void parse_domains(rapidjson::Document &document,
     rapidjson::Value &tmp = document["domains"];
     if (!tmp.IsArray())
     {
-        throw std::runtime_error("\"domains\" is not an array.");
+        throw std::runtime_error("\"domains\" is not an array");
     }
     size_t index = 0;
     for (auto it = tmp.Begin(); it != tmp.End(); ++it, ++index)
@@ -426,7 +438,7 @@ static void parse_domains(rapidjson::Document &document,
         catch (const std::exception &ex)
         {
             throw std::runtime_error("Failed to get \"name\" for domain "
-                + std::to_string(index + 1) + ". " + ex.what());
+                + std::to_string(index + 1) + " -> " + ex.what());
         }
 
         try
@@ -438,7 +450,7 @@ static void parse_domains(rapidjson::Document &document,
         {
             throw std::runtime_error(
                 "Failed to get \"root directory\" for domain "
-                + std::to_string(index + 1) + ". " + ex.what());
+                + std::to_string(index + 1) + " -> " + ex.what());
         }
 
         try
@@ -449,7 +461,7 @@ static void parse_domains(rapidjson::Document &document,
         {
             throw std::runtime_error(
                 "Failed to get \"dynamic pages\" for domain "
-                + std::to_string(index + 1) + ". " + ex.what());
+                + std::to_string(index + 1) + " -> " + ex.what());
         }
 
         domains.emplace_back(dynamicPages, name, rootDirectory);
@@ -465,7 +477,7 @@ static void parse_json_file(FILE *fp, rapidjson::Document &document, char *buf,
     parseResult = document.ParseStream(stream);
     if (!parseResult)
     {
-        throw std::runtime_error(std::string("ParseStream(stream) failed. ")
+        throw std::runtime_error(std::string("ParseStream(stream) failed -> ")
             + rapidjson::GetParseError_En(parseResult.Code()));
     }
 }

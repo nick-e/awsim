@@ -13,8 +13,6 @@ namespace awsim
         Client *prev;
 
         void init(int clientSocket, bool https);
-
-
     };
 }
 

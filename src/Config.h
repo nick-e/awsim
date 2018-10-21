@@ -33,6 +33,7 @@ namespace awsim
         uint16_t httpPort;
         uint16_t httpsPort;
         std::string localhostDomainName;
+        uint64_t minimumSizeOfLargeFiles;
         uint64_t numberOfWorkers;
         double percentOfCoresForWorkers;
         uint64_t staticNumberOfWorkers;

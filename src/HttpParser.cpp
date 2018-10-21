@@ -43,7 +43,7 @@ do {                                                                 \
   parser->state = state;                                             \
   assert(HTTP_PARSER_ERRNO(parser) == HPE_OK);                       \
                                                                      \
-  if (0 != settings->on_##FOR(request, parser)) {                    \
+  if (0 != settings->on_##FOR(request, details, parser)) {           \
     SET_ERRNO(HPE_CB_##FOR);                                         \
   }                                                                  \
                                                                      \
@@ -66,7 +66,7 @@ do {                                                                 \
   assert(HTTP_PARSER_ERRNO(parser) == HPE_OK);                       \
                                                                      \
   if (FOR##_mark) {                                                  \
-    if (0 != settings->on_##FOR(request, parser, FOR##_mark, (LEN))) {\
+    if (0 != settings->on_##FOR(request, details, parser, FOR##_mark, (LEN))) {\
       SET_ERRNO(HPE_CB_##FOR);                                       \
     }                                                                \
                                                                      \
@@ -90,7 +90,7 @@ do {                                                                 \
 #define CALLBACK_SPACE(FOR)                                          \
 do {                                                                 \
   parser->state = state;                                             \
-  if (0 != settings->on_##FOR(request, parser, SPACE, 1)) {           \
+  if (0 != settings->on_##FOR(request, details, parser, SPACE, 1)) { \
     SET_ERRNO(HPE_CB_##FOR);                                         \
     return (p - data);                                               \
   }                                                                  \
@@ -572,6 +572,7 @@ parse_url_char(enum state s, const char ch)
 }
 
 size_t http_parser_execute (HttpRequest *request,
+                            ParserDetails *details,
                             HttpParser *parser,
                             const HttpParserSettings *settings,
                             const char *data,
@@ -1837,7 +1838,7 @@ size_t http_parser_execute (HttpRequest *request,
          * we have to simulate it by handling a change in errno below.
          */
         size_t header_size = p - data + 1;
-        switch (settings->on_headers_complete(request, parser, nullptr,
+        switch (settings->on_headers_complete(request, details, parser, nullptr,
           header_size)) {
           case 0:
             break;

@@ -31,14 +31,18 @@
 #include "rapidjson/error/en.h"
 #include "rapidjson/filereadstream.h"
 
-#include "flags.h"
-#include "defaults.h"
-#include "HttpParser.h"
-#include "HttpRequest.h"
 #include "Client.h"
 #include "Config.h"
-#include "Domain.h"
 #include "CriticalException.h"
+#include "defaults.h"
+#include "Domain.h"
+#include "DynamicPage.h"
+#include "WorkerAndServerFlags.h"
+#include "ServerAndConsoleFlags.h"
+#include "HttpParser.h"
+#include "HttpRequest.h"
+#include "ServerInfo.h"
+#include "Worker.h"
 
 #define AF_FAMILY_TO_STR(a) ((a) == AF_INET ? "AF_INET" : (a) == AF_INET6 \
     ? "AF_INET6" : (a) == AF_UNIX ? "AF_UNIX" : "UNKNOWN")
@@ -46,7 +50,6 @@
     : (a) == SOCK_DGRAM ? "SOCK_DGRAM" : "UNKNOWN")
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define INSERT_FLAG(flag, buffer) (((uint16_t*)(buffer))[0] = (uint16_t)(flag))
-#define NO_FLAGS 0
 
 namespace awsim
 {
@@ -59,111 +62,43 @@ namespace awsim
         static const uint64_t NUMBER_OF_EPOLL_EVENTS = 64;
         static const uint64_t INTERNET_BACKLOG = 1024;
 
-        static void init();
+        Server();
 
     private:
-        class Worker
-        {
-            public:
-                static const uint64_t HTTP_HEADER_BUFFER_SIZE = 8192;
-                static const uint64_t INITIAL_MAX_NUMBER_OF_CLIENTS = 128;
-                static const uint64_t MAX_NUMBER_OF_EPOLL_EVENTS = 8192;
-                static const uint64_t SERVER_PIPE_BUFFER_SIZE = 512;
-
-                static HttpParserSettings httpParserSettings;
-
-                enum class State
-                {
-                    WeakStopPending,
-                    Running,
-                    Crashed,
-                    WeakStopped,
-                    Stopped
-                };
-
-                // Used by both threads
-                std::atomic<State> state;
-
-                // Used by server thread
-                uint64_t numberOfClients;
-
-                void request_weak_stop();
-                uint64_t get_number_of_clients();
-
-                Worker(uint64_t id);
-                ~Worker();
-
-            private:
-                // Used by worker thread
-                Client *clientHeap;
-                Client *allocatedList;
-                Client *unallocatedList;
-                uint64_t maxNumberOfClients;
-                uint64_t _numberOfClients;
-                int epollfd;
-                int serverReadfd;
-                uint64_t id;
-                HttpParser httpParser;
-
-                // Used by server thread
-                std::thread thread;
-
-                // Used by both threads
-                int serverWritefd;
-
-                void accept_http_client();
-                void add_http_client(int clientSocket);
-                void increase_max_number_of_clients(
-                    uint64_t maxNumberOfClients);
-                void handle_client(Client *client);
-                void handle_server_pipe();
-                void remove_client(Client *client);
-                void remove_remote_host_sockets();
-                void request_stop();
-                static void routine_start(Worker &worker);
-                void routine_loop();
-                void stop();
-                void weak_stop();
-                void write_to_pipe(void *buffer, size_t length);
-        };
-
         struct WorkersPipeHeader
         {
             uint64_t workerID;
-            WorkerToServerFlags flag;
+            WorkerAndServerFlags::ToServerFlags flag;
         };
 
-        static sockaddr_storage address;
-        static int consoleSocket;
-        static std::string consoleSocketPath;
-        static std::unordered_map<std::string, Domain> domains;
-        static bool dynamicNumberOfWorkers;
-        static int epollfd;
-        static int httpSocket;
-        static uint64_t nextWorkerID;
-        static uint64_t numberOfConnectedConsoles;
-        static uint64_t numberOfWorkers;
-        static double percentOfCoresForWorkers;
-        static bool quit;
-        static int signalsfd;
-        static uint64_t staticNumberOfWorkers;
-        static std::unordered_map<uint64_t, Worker> workers;
-        static int workersReadfd;
-        static int workersWritefd;
+        int consoleSocket;
+        std::string consoleSocketPath;
+        bool dynamicNumberOfWorkers;
+        int epollfd;
+        ServerInfo info;
+        uint64_t nextWorkerID;
+        uint64_t numberOfConnectedConsoles;
+        uint64_t numberOfWorkers;
+        double percentOfCoresForWorkers;
+        bool quit;
+        int signalsfd;
+        uint64_t staticNumberOfWorkers;
+        int workersReadfd;
+        std::unordered_map<uint64_t, Worker> workers;
 
-        static void accept_console();
-        static void add_worker();
-        static void end();
-        static void end_workers();
-        static bool handle_console(int consoleSocket);
-        static bool handle_signal();
-        static void handle_workers();
-        static void loop();
-        static void restart();
-        static void start();
-        static void start_workers();
-        static void stop();
-        static void write_to_pipe(void *buffer, size_t length);
+        void accept_console();
+        void add_worker();
+        void end();
+        void end_workers();
+        bool handle_console(int consoleSocket);
+        bool handle_epoll_events(int count, epoll_event *events);
+        bool handle_signal();
+        void handle_workers();
+        void loop();
+        void restart();
+        void start();
+        void start_workers();
+        void stop();
     };
 };
 

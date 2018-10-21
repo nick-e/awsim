@@ -5,10 +5,10 @@
 #include <string>
 #include <unordered_map>
 
-#include "HttpRequest.h"
 #include "Client.h"
-#include "DynamicPage.h"
 #include "Config.h"
+#include "DynamicPage.h"
+#include "HttpRequest.h"
 
 namespace awsim
 {
@@ -21,7 +21,7 @@ namespace awsim
 
         Domain(const Config::Domain &domain);
 
-        DynamicPage get_dynamic_page(const std::string &url);
+        DynamicPage get_dynamic_page(const std::string &url) const;
 
     private:
         struct Triple;

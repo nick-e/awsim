@@ -20,7 +20,7 @@ awsim::Domain::Domain(const Config::Domain &domain) :
         catch (const std::exception &ex)
         {
             throw std::runtime_error("Failed to load dynamic library \""
-                + dynamicPage + "\". " + ex.what());
+                + dynamicPage + "\" -> " + ex.what());
         }
 
         try
@@ -30,7 +30,7 @@ awsim::Domain::Domain(const Config::Domain &domain) :
         catch (const std::exception &ex)
         {
             throw std::runtime_error("Failed to insert dynamic library \""
-                + dynamicPage + "\". " + ex.what());
+                + dynamicPage + "\" -> " + ex.what());
         }
     }
 }
@@ -50,7 +50,7 @@ void awsim::Domain::insert_dynamic_page(void *lib)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Could not load function \"get_url\". ") + ex.what());
+            std::string("Could not load function \"get_url\" -> ") + ex.what());
     }
 
     try
@@ -60,7 +60,7 @@ void awsim::Domain::insert_dynamic_page(void *lib)
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Could not load function \"process\". ") + ex.what());
+            std::string("Could not load function \"process\" -> ") + ex.what());
     }
 
     url = get_url();
@@ -94,9 +94,9 @@ void awsim::Domain::insert_dynamic_page(void *lib)
     }
 }
 
-awsim::DynamicPage awsim::Domain::get_dynamic_page(const std::string &url)
+awsim::DynamicPage awsim::Domain::get_dynamic_page(const std::string &url) const
 {
-    DynamicPageMap *map = &dynamicPages;
+    const DynamicPageMap *map = &dynamicPages;
     size_t start = 0;
     while (start < url.length())
     {
@@ -106,7 +106,7 @@ awsim::DynamicPage awsim::Domain::get_dynamic_page(const std::string &url)
         {
             break;
         }
-        Triple &triple = it->second;
+        const Triple &triple = it->second;
         if (triple.nextMap == nullptr)
         {
             break;
@@ -127,8 +127,8 @@ static void* load_symbol(void *lib, const std::string &name)
     sym = dlsym(lib, name.c_str());
     if (sym == nullptr)
     {
-        throw std::runtime_error("dlsym(lib, \"" + name + "\") failed. "
-            + strerror(errno) + ".");
+        throw std::runtime_error("dlsym(lib, \"" + name + "\") failed -> "
+            + strerror(errno));
     }
 
     return sym;
@@ -162,7 +162,7 @@ static void* open_dynamic_library(const std::string &name)
     if (lib == nullptr)
     {
         throw std::runtime_error(std::string("dlopen(\"" + name
-            + "\", RTLD_NOW) failed. ") + strerror(errno) + ".");
+            + "\", RTLD_NOW) failed -> ") + strerror(errno));
     }
 
     return lib;

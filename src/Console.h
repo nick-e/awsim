@@ -9,8 +9,6 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include "Shared.h"
-
 namespace awsim
 {
     class Console

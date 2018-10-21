@@ -1,35 +1,42 @@
-#include "Server.h"
+#include "Worker.h"
 
-#define IS_IN_ACTIVE_STATE(state) ((state) == State::Running \
-    || (state) == State::WeakStopPending)
 #define SERVER_PIPE_PTR (void*)0x0
 #define HTTP_REMOTE_HOST_PTR (void*)0x1
 #define HTTPS_REMOTE_HOST_PTR (void*)0x2
-#define GET_FLAG(buffer) ((ServerToWorkerFlags)(((uint16_t*)(buffer))[0]))
 #define HTTP_HEADER_BUFFER_SIZE 8192
 #define UNUSED(x) (void)(x)
+#define NO_FLAGS 0
+#define NUMBER_OF_EPOLL_EVENTS 1024
+
+#define GET_FLAG(buffer) ((WorkerAndServerFlags::ToWorkerFlags)(((uint16_t*)(buffer))[0]))
+#define INSERT_FLAG(flag, buffer) (((uint16_t*)(buffer))[0] = (uint16_t)(flag))
+#define IS_IN_ACTIVE_STATE(state) ((state) == State::Running \
+    || (state) == State::WeakStopPending)
 
 static int on_message_begin(awsim::HttpRequest *request,
-    awsim::HttpParser *parser);
-static int on_url(awsim::HttpRequest *request, awsim::HttpParser *parser,
-    const char *at, size_t length);
+    awsim::ParserDetails *details, awsim::HttpParser *parser);
+static int on_url(awsim::HttpRequest *request, awsim::ParserDetails *details,
+    awsim::HttpParser *parser, const char *at, size_t length);
 static int on_header_field(awsim::HttpRequest *request,
-    awsim::HttpParser *parser, const char *at, size_t length);
+    awsim::ParserDetails *details, awsim::HttpParser *parser, const char *at,
+    size_t length);
 static int on_header_value(awsim::HttpRequest *request,
-    awsim::HttpParser *parser, const char *at, size_t length);
+    awsim::ParserDetails *details, awsim::HttpParser *parser, const char *at,
+    size_t length);
 static int on_headers_complete(awsim::HttpRequest *request,
+    awsim::ParserDetails *details, awsim::HttpParser *parser, const char *at,
+    size_t length);
+static int on_body(awsim::HttpRequest *request, awsim::ParserDetails *details,
     awsim::HttpParser *parser, const char *at, size_t length);
-static int on_body(awsim::HttpRequest *request, awsim::HttpParser *parser,
-    const char *at, size_t length);
 static int on_message_complete(awsim::HttpRequest *request,
-    awsim::HttpParser *parser);
-static int on_reason(awsim::HttpRequest *request, awsim::HttpParser *parser,
-    const char *at, size_t length);
+    awsim::ParserDetails *details, awsim::HttpParser *parser);
+static int on_reason(awsim::HttpRequest *request, awsim::ParserDetails *details,
+    awsim::HttpParser *parser, const char *at, size_t length);
 static int on_chunk_header(awsim::HttpRequest *request,
-    awsim::HttpParser *parser);
+    awsim::ParserDetails *details, awsim::HttpParser *parser);
 static int on_chunk_complete(awsim::HttpRequest *request,
-    awsim::HttpParser *parser);
-awsim::HttpParserSettings awsim::Server::Worker::httpParserSettings =
+    awsim::ParserDetails *details, awsim::HttpParser *parser);
+awsim::HttpParserSettings awsim::Worker::httpParserSettings =
 {
     .on_message_begin = on_message_begin,
     .on_url = on_url,
@@ -48,20 +55,20 @@ static void create_pipe(int *readfd, int *writefd);
 static ssize_t read_fd(int fd, void *buffer, size_t length);
 static void remove_fd_from_epoll(int fd, int epollfd);
 
-awsim::HttpRequest::Field httpRequestField;
-
 static int on_message_begin(awsim::HttpRequest *request,
-    awsim::HttpParser *parser)
+    awsim::ParserDetails *details, awsim::HttpParser *parser)
 {
     UNUSED(request);
     UNUSED(parser);
+    UNUSED(details);
     return 0;
 }
 
-static int on_url(awsim::HttpRequest *request, awsim::HttpParser *parser,
-    const char *at, size_t length)
+static int on_url(awsim::HttpRequest *request, awsim::ParserDetails *details,
+    awsim::HttpParser *parser, const char *at, size_t length)
 {
     UNUSED(parser);
+    UNUSED(details);
     bool foundPeriod = false;
 
     request->url.buffer = at;
@@ -87,37 +94,42 @@ static int on_url(awsim::HttpRequest *request, awsim::HttpParser *parser,
 }
 
 static int on_header_field(awsim::HttpRequest *request,
-    awsim::HttpParser *parser, const char *at, size_t length)
+    awsim::ParserDetails *details, awsim::HttpParser *parser, const char *at,
+    size_t length)
 {
     const char *fieldString;
 
     UNUSED(request);
     UNUSED(parser);
 
-    httpRequestField = awsim::HttpRequest::Field::Unknown;
+    awsim::HttpRequest::Field headerField = awsim::HttpRequest::Field::Unknown;
     if (length > 0)
     {
         switch (at[0])
         {
             case 'H':
-                httpRequestField = awsim::HttpRequest::Field::Host;
+                headerField = awsim::HttpRequest::Field::Host;
                 break;
             case 'A':
-                httpRequestField = awsim::HttpRequest::Field::Accept; // or maybe Accept-Language or Accept-Encoding
+                // or maybe Accept-Language or Accept-Encoding
+                headerField = awsim::HttpRequest::Field::Accept;
                 break;
             case 'C':
-                httpRequestField = awsim::HttpRequest::Field::Connection;
+                headerField = awsim::HttpRequest::Field::Connection;
                 break;
             case 'U':
-                httpRequestField = awsim::HttpRequest::Field::UserAgent; // or maybe Upgrade-Insecure-Requests
+                // or maybe Upgrade-Insecure-Requests
+                headerField = awsim::HttpRequest::Field::UserAgent;
+                break;
+            default:
+                headerField = awsim::HttpRequest::Field::Unknown;
                 break;
         }
     }
 
-    if (httpRequestField != awsim::HttpRequest::Field::Unknown)
+    if (headerField != awsim::HttpRequest::Field::Unknown)
     {
-        fieldString = awsim::HttpRequest::fieldStrings[
-            (int)httpRequestField];
+        fieldString = awsim::HttpRequest::fieldStrings[(int)headerField];
         for (size_t i = 0; i < length; ++i)
         {
             char actual = at[i];
@@ -125,48 +137,47 @@ static int on_header_field(awsim::HttpRequest *request,
 
             if (actual != desired)
             {
-                if (httpRequestField == awsim::HttpRequest::Field::Accept)
+                if (headerField == awsim::HttpRequest::Field::Accept)
                 {
-                    httpRequestField =
-                        awsim::HttpRequest::Field::AcceptEncoding;
-                    fieldString = awsim::HttpRequest::fieldStrings[
-                        (int)httpRequestField];
+                    headerField = awsim::HttpRequest::Field::AcceptEncoding;
+                    fieldString =
+                        awsim::HttpRequest::fieldStrings[(int)headerField];
                     --i;
                 }
-                else if (httpRequestField ==
+                else if (headerField ==
                     awsim::HttpRequest::Field::AcceptEncoding)
                 {
-                    httpRequestField =
-                        awsim::HttpRequest::Field::AcceptLanguage;
-                    fieldString = awsim::HttpRequest::fieldStrings[
-                        (int)httpRequestField];
+                    headerField = awsim::HttpRequest::Field::AcceptLanguage;
+                    fieldString =
+                        awsim::HttpRequest::fieldStrings[(int)headerField];
                     --i;
                 }
-                else if (httpRequestField ==
-                    awsim::HttpRequest::Field::UserAgent)
+                else if (headerField == awsim::HttpRequest::Field::UserAgent)
                 {
-                    httpRequestField =
+                    headerField =
                         awsim::HttpRequest::Field::UpgradeInsecureRequests;
-                    fieldString = awsim::HttpRequest::fieldStrings[
-                        (int)httpRequestField];
+                    fieldString =
+                        awsim::HttpRequest::fieldStrings[(int)headerField];
                     --i;
                 }
                 else
                 {
-                    httpRequestField = awsim::HttpRequest::Field::Unknown;
+                    headerField = awsim::HttpRequest::Field::Unknown;
                     break;
                 }
             }
             else if (i == length - 1 && fieldString[i + 1] != '\0')
             {
-                httpRequestField = awsim::HttpRequest::Field::Unknown;
+                headerField = awsim::HttpRequest::Field::Unknown;
                 break;
             }
         }
     }
 
+    details->set_current_header_field(headerField);
+
     #ifdef AWSIM_DEBUG
-        if (httpRequestField == awsim::HttpRequest::Field::Unknown)
+        if (headerField == awsim::HttpRequest::Field::Unknown)
         {
             syslog(LOG_DEBUG, "Unknown header field \"%.*s\"", (int)length, at);
         }
@@ -176,62 +187,99 @@ static int on_header_field(awsim::HttpRequest *request,
 }
 
 static int on_header_value(awsim::HttpRequest *request,
-    awsim::HttpParser *parser, const char *at, size_t length)
+    awsim::ParserDetails *details, awsim::HttpParser *parser, const char *at,
+    size_t length)
 {
     UNUSED(parser);
+    UNUSED(details);
 
-    switch (httpRequestField)
+    if (!details->domain_proven_missing() && !details->resource_proven_missing()
+        && !details->resource_proven_static())
     {
-        case awsim::HttpRequest::Field::Host:
-            request->host.buffer = at;
-            request->host.length = length;
-            request->host.set = true;
-            break;
-        case awsim::HttpRequest::Field::UserAgent:
-            request->userAgent.buffer = at;
-            request->userAgent.length = length;
-            request->userAgent.set = true;
-            break;
-        case awsim::HttpRequest::Field::Accept:
-            request->accept.buffer = at;
-            request->accept.length = length;
-            request->accept.set = true;
-            break;
-        case awsim::HttpRequest::Field::AcceptLanguage:
-            request->acceptLanguage.buffer = at;
-            request->acceptLanguage.length = length;
-            request->acceptLanguage.set = true;
-            break;
-        case awsim::HttpRequest::Field::AcceptEncoding:
-            request->acceptEncoding.buffer = at;
-            request->acceptEncoding.length = length;
-            request->acceptEncoding.set = true;
-            break;
-        case awsim::HttpRequest::Field::Connection:
-            request->connection.buffer = at;
-            request->connection.length = length;
-            request->connection.set = true;
-            break;
-        case awsim::HttpRequest::Field::UpgradeInsecureRequests:
-            request->upgradeInsecureRequests.buffer = at;
-            request->upgradeInsecureRequests.length = length;
-            request->upgradeInsecureRequests.set = true;
-            break;
-        case awsim::HttpRequest::Field::Unknown:
-        default:
-            syslog(LOG_WARNING, "Unknown header value \"%.*s\"", (int)length,
-                at);
-            break;
+        awsim::HttpRequest::Field headerField =
+            details->get_current_header_field();
+        switch (headerField)
+        {
+            case awsim::HttpRequest::Field::Host:
+            {
+                const auto it = details->domains.find(std::string(at, length));
+
+                request->host.buffer = at;
+                request->host.length = length;
+                request->host.set = true;
+                if (it == details->domains.end())
+                {
+                    details->set_domain_proven_missing();
+                }
+                else if (access(at[0] == '/' ? (at + 1) : at, F_OK) == -1)
+                {
+                    awsim::DynamicPage dynamicPage =
+                        it->second.get_dynamic_page(
+                        std::string(request->url.buffer, request->url.length));
+
+                    if (dynamicPage == nullptr)
+                    {
+                        details->set_resource_proven_missing();
+                    }
+                    else
+                    {
+                        details->set_resource_dynamic_page(dynamicPage);
+                    }
+                }
+                else
+                {
+                    details->set_resource_proven_static();
+                }
+                break;
+            }
+            case awsim::HttpRequest::Field::UserAgent:
+                request->userAgent.buffer = at;
+                request->userAgent.length = length;
+                request->userAgent.set = true;
+                break;
+            case awsim::HttpRequest::Field::Accept:
+                request->accept.buffer = at;
+                request->accept.length = length;
+                request->accept.set = true;
+                break;
+            case awsim::HttpRequest::Field::AcceptLanguage:
+                request->acceptLanguage.buffer = at;
+                request->acceptLanguage.length = length;
+                request->acceptLanguage.set = true;
+                break;
+            case awsim::HttpRequest::Field::AcceptEncoding:
+                request->acceptEncoding.buffer = at;
+                request->acceptEncoding.length = length;
+                request->acceptEncoding.set = true;
+                break;
+            case awsim::HttpRequest::Field::Connection:
+                request->connection.buffer = at;
+                request->connection.length = length;
+                request->connection.set = true;
+                break;
+            case awsim::HttpRequest::Field::UpgradeInsecureRequests:
+                request->upgradeInsecureRequests.buffer = at;
+                request->upgradeInsecureRequests.length = length;
+                request->upgradeInsecureRequests.set = true;
+                break;
+            case awsim::HttpRequest::Field::Unknown:
+            default:
+                syslog(LOG_WARNING, "Unknown header value \"%.*s\"", (int)length,
+                    at);
+                break;
+        }
     }
 
     return 0;
 }
 
 static int on_headers_complete(awsim::HttpRequest *request,
-    awsim::HttpParser *parser, const char *at, size_t length)
+    awsim::ParserDetails *details, awsim::HttpParser *parser, const char *at,
+    size_t length)
 {
     UNUSED(at);
     UNUSED(length);
+    UNUSED(details);
 
     switch(parser->method)
     {
@@ -311,62 +359,68 @@ static int on_headers_complete(awsim::HttpRequest *request,
     return 0;
 }
 
-static int on_body(awsim::HttpRequest *request, awsim::HttpParser *parser,
-    const char *at, size_t length)
+static int on_body(awsim::HttpRequest *request, awsim::ParserDetails *details,
+    awsim::HttpParser *parser, const char *at, size_t length)
 {
     UNUSED(request);
     UNUSED(parser);
     UNUSED(at);
     UNUSED(length);
+    UNUSED(details);
     return 0;
 }
 
 static int on_message_complete(awsim::HttpRequest *request,
-    awsim::HttpParser *parser)
+    awsim::ParserDetails *details, awsim::HttpParser *parser)
 {
     UNUSED(request);
     UNUSED(parser);
+    UNUSED(details);
     return 0;
 }
 
-static int on_reason(awsim::HttpRequest *request, awsim::HttpParser *parser,
-    const char *at, size_t length)
+static int on_reason(awsim::HttpRequest *request, awsim::ParserDetails *details,
+    awsim::HttpParser *parser, const char *at, size_t length)
 {
     UNUSED(request);
     UNUSED(parser);
     UNUSED(at);
     UNUSED(length);
+    UNUSED(details);
     return 0;
 }
 
 static int on_chunk_header(awsim::HttpRequest *request,
-    awsim::HttpParser *parser)
+    awsim::ParserDetails *details, awsim::HttpParser *parser)
 {
     UNUSED(request);
     UNUSED(parser);
+    UNUSED(details);
     return 0;
 }
 
 static int on_chunk_complete(awsim::HttpRequest *request,
-    awsim::HttpParser *parser)
+    awsim::ParserDetails *details, awsim::HttpParser *parser)
 {
     UNUSED(request);
     UNUSED(parser);
+    UNUSED(details);
     return 0;
 }
 
-void awsim::Server::Worker::accept_http_client()
+void awsim::Worker::accept_http_client()
 {
     int clientSocket;
 
     #ifdef AWSIM_DEBUG
         syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Accepting HTTP client.", id);
     #endif
-    clientSocket = accept(Server::httpSocket, nullptr, nullptr);
+    clientSocket = accept(serverInfo.httpSocket, nullptr, nullptr);
     if (clientSocket == -1)
     {
-        throw std::runtime_error("accept(" + std::to_string(Server::httpSocket)
-            + ", nullptr, nullptr) failed. " + strerror(errno) + ")");
+        throw std::runtime_error("accept(" + std::to_string(
+            serverInfo.httpSocket) + ", nullptr, nullptr) failed -> "
+            + strerror(errno));
     }
 
     try
@@ -376,17 +430,17 @@ void awsim::Server::Worker::accept_http_client()
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Could not add HTTP client. ") + ex.what());
+            std::string("Could not add HTTP client -> ") + ex.what());
     }
 }
 
-void awsim::Server::Worker::add_http_client(int clientSocket)
+void awsim::Worker::add_http_client(int clientSocket)
 {
     epoll_event event;
     Client *client;
 
     #ifdef AWSIM_DEBUG
-        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Adding HTTP client.", id);
+        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Adding HTTP client", id);
     #endif
     if (_numberOfClients == maxNumberOfClients)
     {
@@ -397,13 +451,13 @@ void awsim::Server::Worker::add_http_client(int clientSocket)
         catch (const CriticalException &ex)
         {
             throw CriticalException(
-                std::string("Failed to increase max number of clients. ")
+                std::string("Failed to increase max number of clients -> ")
                 + ex.what());
         }
         catch (const std::exception &ex)
         {
             throw std::runtime_error(
-                std::string("Failed to increase max number of clients. ")
+                std::string("Failed to increase max number of clients -> ")
                 + ex.what());
         }
     }
@@ -414,7 +468,7 @@ void awsim::Server::Worker::add_http_client(int clientSocket)
     {
         throw std::runtime_error("epoll_ctl(" + std::to_string(epollfd)
             + ", EPOLL_CTL_ADD, " + std::to_string(clientSocket)
-            + ", &event) failed. " + strerror(errno) + ".");
+            + ", &event) failed -> " + strerror(errno));
     }
 
     unallocatedList = client->next;
@@ -440,8 +494,8 @@ static int create_epoll(int httpSocket, int serverReadfd)
 
     if ((epollfd = epoll_create1(0)) == -1)
     {
-        throw std::runtime_error("epoll_create1() failed ("
-            + std::string(strerror(errno)) + ")");
+        throw std::runtime_error("epoll_create1(0) failed -> "
+            + std::string(strerror(errno)));
     }
 
     event.events = EPOLLIN | EPOLLEXCLUSIVE;
@@ -451,7 +505,7 @@ static int create_epoll(int httpSocket, int serverReadfd)
     {
         throw std::runtime_error("epoll_ctl(" + std::to_string(epollfd)
             + ", EPOLL_CTL_ADD, " + std::to_string(httpSocket)
-            + ", &event) failed. " + strerror(errno) + ".");
+            + ", &event) failed -> " + strerror(errno));
     }
 
     event.events = EPOLLIN;
@@ -461,7 +515,7 @@ static int create_epoll(int httpSocket, int serverReadfd)
     {
         throw std::runtime_error("epoll_ctl(" + std::to_string(epollfd)
             + ", EPOLL_CTL_ADD, " + std::to_string(serverReadfd)
-            + ", &event) failed. " + strerror(errno) + ".");
+            + ", &event) failed -> " + strerror(errno));
     }
 
     return epollfd;
@@ -473,42 +527,45 @@ static void create_pipe(int *readfd, int *writefd)
 
     if (pipe(fds) == -1)
     {
-        throw std::runtime_error(std::string("pipe(fds) failed. ")
-            + strerror(errno) + ".");
+        throw std::runtime_error(std::string("pipe(fds) failed -> ")
+            + strerror(errno));
     }
 
     *readfd = fds[0];
     *writefd = fds[1];
 }
 
-void awsim::Server::Worker::handle_client(Client *client)
+void awsim::Worker::handle_client(Client *client)
 {
     char buffer[HTTP_HEADER_BUFFER_SIZE];
     ssize_t length;
     size_t nparsed;
     HttpRequest request;
+    struct stat *stat = nullptr;
+    int fd;
 
     #ifdef AWSIM_DEBUG
-        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Handling a client.", id);
+        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Handling a client", id);
     #endif
     length = recv(client->sock, buffer, 1024, 0);
     if (length == -1)
     {
         throw std::runtime_error("recv(" + std::to_string(client->sock)
             + ", buffer, " + std::to_string(sizeof(buffer)) + ", "
-            + std::to_string(NO_FLAGS) + ") failed. " + strerror(errno));
+            + std::to_string(NO_FLAGS) + ") failed -> " + strerror(errno));
     }
     if (length == 0)
     {
         #ifdef AWSIM_DEBUG
-            syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Client disconnected.", id);
+            syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Client disconnected", id);
         #endif
         remove_client(client);
         return;
     }
 
+    ParserDetails details(serverInfo.domains);
     httpParser.data = client;
-    nparsed = http_parser_execute(&request, &httpParser,
+    nparsed = http_parser_execute(&request, &details, &httpParser,
         &httpParserSettings, buffer, length);
     if (nparsed != (size_t)length)
     {
@@ -516,10 +573,92 @@ void awsim::Server::Worker::handle_client(Client *client)
         throw std::runtime_error("Failed to parse HTTP request");
     }
 
-    
+    if (details.domain_proven_missing())
+    {
+        #ifdef AWSIM_DEBUG
+            syslog(LOG_DEBUG,
+                "(Worker %" PRIu64 ") Client requested unknown domain \"%.*s\"",
+                id, (int)request.host.length, request.host.buffer);
+        #endif
+    }
+    else if (details.resource_proven_missing())
+    {
+        #ifdef AWSIM_DEBUG
+            syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Client requested missing "
+                "resource \"%.*s\"", id, (int)request.url.length,
+                request.url.buffer);
+        #endif
+    }
+    if (details.resource_proven_static())
+    {
+        #ifdef AWSIM_DEBUG
+            syslog(LOG_DEBUG,
+                "(Worker %" PRIu64 ") Sending HTTP response for \"%.*s\"", id,
+                (int)request.url.length, request.url.buffer);
+        #endif
+        buffer[(request.url.buffer - buffer) + request.url.length] = '\0';
+        fd = open(request.url.buffer, NO_FLAGS);
+        if (fd == -1)
+        {
+            if (errno == EACCES)
+            {
+                // TODO: send 404
+            }
+            else
+            {
+                throw std::runtime_error("Failed to open resource \""
+                    + std::string(request.url.buffer) + "\" -> "
+                    + strerror(errno));
+            }
+        }
+        if (fstat(fd, stat) == -1)
+        {
+            throw std::runtime_error("fstat(" + std::to_string(fd)
+                + ", stat) failed -> " + strerror(errno));
+        }
+        if ((unsigned)stat->st_size >= serverInfo.minimumSizeOfLargeFiles)
+        {
+            // TODO: send to large file handler
+        }
+        else
+        {
+
+            HttpResponse response(1, 1, HttpResponse::StatusCode::OK_200);
+            response.set_content_length(stat->st_size);
+            try
+            {
+                response.send_to(client->sock);
+            }
+            catch (const std::exception &ex)
+            {
+                throw std::runtime_error(
+                    std::string("Failed to send HTTP response -> ")
+                    + ex.what());
+            }
+            size_t sent = 0;
+            while (sent < (unsigned)stat->st_size)
+            {
+                ssize_t tmp = sendfile(client->sock, fd, nullptr,
+                    stat->st_size);
+                if (tmp == -1)
+                {
+                    throw std::runtime_error("sendfile("
+                        + std::to_string(client->sock) + ", "
+                        + std::to_string(fd) + ", nullptr, "
+                        + std::to_string(stat->st_size) + ") failed -> "
+                        + strerror(errno));
+                }
+                sent += tmp;
+            }
+        }
+    }
+    else
+    {
+        // TODO: send to dynamic file handler
+    }
 }
 
-void awsim::Server::Worker::handle_server_pipe()
+void awsim::Worker::handle_server_pipe()
 {
     char buffer[SERVER_PIPE_BUFFER_SIZE];
     char *offset;
@@ -529,48 +668,48 @@ void awsim::Server::Worker::handle_server_pipe()
     offset = buffer;
     while ((size_t)length >= sizeof(uint16_t))
     {
-        ServerToWorkerFlags flag = GET_FLAG(offset);
+        WorkerAndServerFlags::ToWorkerFlags flag = GET_FLAG(offset);
 
         #ifdef AWSIM_DEBUG
-            syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Received %s.", id,
-                ServerToWorkerFlagToString(flag).c_str());
+            syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Received %s", id,
+                WorkerAndServerFlags::to_string(flag).c_str());
         #endif
         length -= sizeof(uint16_t);
         offset += sizeof(uint16_t);
         switch(flag)
         {
-            case ServerToWorkerFlags::WeakStopRequest:
+            case WorkerAndServerFlags::ToWorkerFlags::WeakStopRequest:
                 weak_stop();
                 break;
-            case ServerToWorkerFlags::StopRequest:
+            case WorkerAndServerFlags::ToWorkerFlags::StopRequest:
                 stop();
                 break;
-            case ServerToWorkerFlags::NumberOfClientsRequest:
-                INSERT_FLAG(WorkerToServerFlags::NumberOfClients, buffer);
+            case WorkerAndServerFlags::ToWorkerFlags::NumberOfClientsRequest:
+                INSERT_FLAG(WorkerAndServerFlags::ToServerFlags::NumberOfClients, buffer);
                 ((uint64_t*)(buffer + sizeof(uint16_t)))[0] = _numberOfClients;
                 break;
             default:
                 throw std::runtime_error("Received unknown flag form worker, "
-                    + std::to_string((uint16_t)flag) + ".");
+                    + std::to_string((uint16_t)flag));
         }
     }
 }
 
-void awsim::Server::Worker::increase_max_number_of_clients(
+void awsim::Worker::increase_max_number_of_clients(
     uint64_t maxNumberOfClients)
 {
     #ifdef AWSIM_DEBUG
         syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Increasing max number of "
-            "clients from %" PRIu64 " to %" PRIu64 ".", id,
+            "clients from %" PRIu64 " to %" PRIu64, id,
             this->maxNumberOfClients, maxNumberOfClients);
     #endif
     if (maxNumberOfClients < this->maxNumberOfClients)
     {
-        throw std::runtime_error("The new max number of clients must be greater than "
-            "the current value. Current value is "
+        throw std::runtime_error("The new max number of clients must be "
+            "greater than the current value. Current value is "
             + std::to_string(this->maxNumberOfClients)
             + " and the new value is "
-            + std::to_string(this->maxNumberOfClients) + ".");
+            + std::to_string(this->maxNumberOfClients));
     }
 
     if (maxNumberOfClients == this->maxNumberOfClients)
@@ -584,7 +723,7 @@ void awsim::Server::Worker::increase_max_number_of_clients(
         {
             throw CriticalException("malloc("
                + std::to_string(sizeof(Client) * maxNumberOfClients)
-                + ") failed. " + strerror(errno) + ".");
+                + ") failed -> " + strerror(errno));
         }
     }
     else
@@ -595,7 +734,7 @@ void awsim::Server::Worker::increase_max_number_of_clients(
         {
             throw CriticalException("realloc(clientHeap, "
                + std::to_string(sizeof(Client) * maxNumberOfClients)
-                + ") failed. " + strerror(errno) + ".");
+                + ") failed -> " + strerror(errno));
         }
 
     }
@@ -619,7 +758,7 @@ void awsim::Server::Worker::increase_max_number_of_clients(
             {
                 throw std::runtime_error("epoll_ctl(" + std::to_string(epollfd)
                     + ", EPOLL_CTL_MOD, " + std::to_string(client.sock)
-                    + "&event) failed. " + strerror(errno) + ".");
+                    + "&event) failed -> " + strerror(errno));
             }
 
             client.next = allocatedList;
@@ -651,10 +790,10 @@ void awsim::Server::Worker::increase_max_number_of_clients(
     this->maxNumberOfClients = maxNumberOfClients;
 }
 
-void awsim::Server::Worker::remove_client(Client *client)
+void awsim::Worker::remove_client(Client *client)
 {
     #ifdef AWSIM_DEBUG
-        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Removing client.", id);
+        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Removing client", id);
     #endif
 
     if (client->prev != nullptr)
@@ -678,8 +817,8 @@ static void remove_fd_from_epoll(int fd, int epollfd)
     if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, nullptr) == -1)
     {
         throw std::runtime_error("epoll_ctl(" + std::to_string(epollfd)
-            + ", EPOLL_CTL_DEL, " + std::to_string(fd) + ", nullptr) failed. "
-            + strerror(errno) + ".");
+            + ", EPOLL_CTL_DEL, " + std::to_string(fd) + ", nullptr) failed -> "
+            + strerror(errno));
     }
 }
 
@@ -691,28 +830,28 @@ static ssize_t read_fd(int fd, void *buffer, size_t length)
     if (result == -1)
     {
         throw std::runtime_error("read(" + std::to_string(fd) + ", buffer, "
-            + std::to_string(length) + ") failed. " + strerror(errno) + ".");
+            + std::to_string(length) + ") failed -> " + strerror(errno));
     }
     return result;
 }
 
-void awsim::Server::Worker::remove_remote_host_sockets()
+void awsim::Worker::remove_remote_host_sockets()
 {
     try
     {
-        remove_fd_from_epoll(Server::httpSocket, epollfd);
+        remove_fd_from_epoll(serverInfo.httpSocket, epollfd);
     }
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Failed to remove HTTP socket from epoll. ")
+            std::string("Failed to remove HTTP socket from epoll -> ")
             + ex.what());
     }
 }
 
-void awsim::Server::Worker::request_stop()
+void awsim::Worker::request_stop()
 {
-    uint16_t flag = (uint16_t)ServerToWorkerFlags::StopRequest;
+    uint16_t flag = (uint16_t)WorkerAndServerFlags::ToWorkerFlags::StopRequest;
     try
     {
         write_to_pipe(&flag, sizeof(flag));
@@ -720,13 +859,13 @@ void awsim::Server::Worker::request_stop()
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Failed to request worker to stop. ") + ex.what());
+            std::string("Failed to request worker to stop -> ") + ex.what());
     }
 }
 
-void awsim::Server::Worker::request_weak_stop()
+void awsim::Worker::request_weak_stop()
 {
-    uint16_t flag = (uint16_t)ServerToWorkerFlags::WeakStopRequest;
+    uint16_t flag = (uint16_t)WorkerAndServerFlags::ToWorkerFlags::WeakStopRequest;
     try
     {
         write_to_pipe(&flag, sizeof(flag));
@@ -734,12 +873,12 @@ void awsim::Server::Worker::request_weak_stop()
     catch (const std::exception &ex)
     {
         throw std::runtime_error(
-            std::string("Failed to request worker to weak stop. ")
+            std::string("Failed to request worker to weak stop -> ")
             + ex.what());
     }
 }
 
-void awsim::Server::Worker::routine_loop()
+void awsim::Worker::routine_loop()
 {
     epoll_event events[NUMBER_OF_EPOLL_EVENTS];
 
@@ -756,8 +895,8 @@ void awsim::Server::Worker::routine_loop()
             }
             throw std::runtime_error("epoll_wait(" + std::to_string(epollfd)
                 + ", events, "
-                + std::to_string(NUMBER_OF_EPOLL_EVENTS) + ", -1) failed. "
-                + strerror(errno) + "." + std::to_string(errno));
+                + std::to_string(NUMBER_OF_EPOLL_EVENTS) + ", -1) failed -> "
+                + strerror(errno));
         }
         for (int i = 0; IS_IN_ACTIVE_STATE(state) && i < nfds; ++i)
         {
@@ -772,14 +911,14 @@ void awsim::Server::Worker::routine_loop()
                 catch (const CriticalException &ex)
                 {
                     throw std::runtime_error(
-                        std::string("Failed to accept HTTP client. ")
+                        std::string("Failed to accept HTTP client -> ")
                         + ex.what());
                 }
                 catch (const std::exception &ex)
                 {
                     syslog(LOG_ERR,
-                        "(Worker %" PRIu64 ") Failed to accept HTTP client. %s",
-                        id, ex.what());
+                        "(Worker %" PRIu64 ") Failed to accept HTTP client -> "
+                        "%s", id, ex.what());
                 }
             }
             else if (event.data.ptr == SERVER_PIPE_PTR)
@@ -797,33 +936,44 @@ void awsim::Server::Worker::routine_loop()
                 {
                     remove_client(client);
                     syslog(LOG_ERR,
-                        "(Worker %" PRIu64 ") Failed to handle client. %s", id,
-                        ex.what());
+                        "(Worker %" PRIu64 ") Failed to handle client -> %s",
+                        id, ex.what());
                 }
             }
         }
     }
+
     if (state == State::WeakStopPending)
     {
-        uint16_t flag = (uint16_t)WorkerToServerFlags::WeakStopCompleted;
+        uint16_t flag = (uint16_t)WorkerAndServerFlags::ToServerFlags::WeakStopCompleted;
 
         #ifdef AWSIM_DEBUG
-            syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Weak stop completed.", id);
+            syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Weak stop completed", id);
         #endif
         try
         {
-            Server::write_to_pipe(&flag, sizeof(flag));
+            write_to_server(&flag, sizeof(flag));
         }
         catch (const std::exception &ex)
         {
             throw std::runtime_error(
-                std::string("Failed to notify main thread of weak stop. ")
+                std::string("Failed to notify main thread of weak stop -> ")
                 + ex.what());
         }
     }
 }
 
-void awsim::Server::Worker::routine_start(Worker &worker)
+void awsim::Worker::write_to_server(void *buffer, size_t length)
+{
+    if (write(serverInfo.workersWritefd, buffer, length) == -1)
+    {
+        throw std::runtime_error("write("
+            + std::to_string(serverInfo.workersWritefd) + ", buffer, "
+            + std::to_string(length) + ") failed -> " + strerror(errno));
+    }
+}
+
+void awsim::Worker::routine_start(Worker &worker)
 {
     try
     {
@@ -833,21 +983,21 @@ void awsim::Server::Worker::routine_start(Worker &worker)
     {
         worker.state = State::Crashed;
         syslog(LOG_ALERT,
-            "(Worker %" PRIu64 ") Crashed. Failed to create a pipe. %s",
+            "(Worker %" PRIu64 ") Crashed -> Failed to create a pipe -> %s",
             worker.id, ex.what());
         return;
     }
 
     try
     {
-        worker.epollfd = ::create_epoll(Server::httpSocket,
+        worker.epollfd = ::create_epoll(worker.serverInfo.httpSocket,
             worker.serverReadfd);
     }
     catch (const std::exception &ex)
     {
         worker.state = State::Crashed;
         syslog(LOG_ALERT,
-            "(Worker %" PRIu64 ") Crashed. Failed to setup an epoll. %s",
+            "(Worker %" PRIu64 ") Crashed -> Failed to setup an epoll -> %s",
             worker.id, ex.what());
         return;
     }
@@ -864,8 +1014,8 @@ void awsim::Server::Worker::routine_start(Worker &worker)
     catch (const std::exception &ex)
     {
         worker.state = State::Crashed;
-        syslog(LOG_ALERT, "(Worker %" PRIu64 ") Crashed. Failed increase max "
-            "number of clients. %s", worker.id, ex.what());
+        syslog(LOG_ALERT, "(Worker %" PRIu64 ") Crashed -> Failed increase "
+            "max number of clients -> %s", worker.id, ex.what());
         return;
     }
 
@@ -878,15 +1028,15 @@ void awsim::Server::Worker::routine_start(Worker &worker)
     catch (const std::exception &ex)
     {
         worker.state = State::Crashed;
-        syslog(LOG_ALERT, "(Worker %" PRIu64 ") Crashed. %s", worker.id,
+        syslog(LOG_ALERT, "(Worker %" PRIu64 ") Crashed -> %s", worker.id,
             ex.what());
     }
 }
 
-void awsim::Server::Worker::stop()
+void awsim::Worker::stop()
 {
     #ifdef AWSIM_DEBUG
-        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Stopping.", id);
+        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Stopping", id);
     #endif
     Client *client;
 
@@ -911,10 +1061,10 @@ void awsim::Server::Worker::stop()
     state = State::Stopped;
 }
 
-void awsim::Server::Worker::weak_stop()
+void awsim::Worker::weak_stop()
 {
     #ifdef AWSIM_DEBUG
-        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Weak stopping.", id);
+        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Weak stopping", id);
     #endif
     remove_remote_host_sockets();
     if (_numberOfClients == 0)
@@ -927,31 +1077,32 @@ void awsim::Server::Worker::weak_stop()
     }
 }
 
-awsim::Server::Worker::Worker(uint64_t id) :
+awsim::Worker::Worker(uint64_t id, ServerInfo &serverInfo) :
     numberOfClients(0),
     id(id), // order matters, this should be set before the thread begins
+    serverInfo(serverInfo),
     thread(&routine_start, std::ref(*this))
 {
     #ifdef AWSIM_DEBUG
-        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Starting.", id);
+        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Starting", id);
     #endif
 }
 
-awsim::Server::Worker::~Worker()
+awsim::Worker::~Worker()
 {
     #ifdef AWSIM_DEBUG
-        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Ending.", id);
+        syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Ending", id);
     #endif
     request_stop();
     thread.join();
 }
 
-void awsim::Server::Worker::write_to_pipe(void *buffer, size_t length)
+void awsim::Worker::write_to_pipe(void *buffer, size_t length)
 {
     if (write(serverWritefd, buffer, length) == -1)
     {
         throw std::runtime_error("write(" + std::to_string(serverWritefd)
-            + ", buffer, " + std::to_string(length) + ") failed. "
-            + strerror(errno) + ".");
+            + ", buffer, " + std::to_string(length) + ") failed -> "
+            + strerror(errno));
     }
 }
