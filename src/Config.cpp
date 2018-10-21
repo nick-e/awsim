@@ -42,7 +42,7 @@ awsim::Config::Config(const std::string &filePath)
     catch (const std::exception &ex)
     {
         throw std::runtime_error("Failed to parse config file at \""
-            + filePath + "\"-> " + ex.what());
+            + filePath + "\" -> " + ex.what());
     }
 
     try
@@ -193,7 +193,7 @@ static void create_config_file(const std::string &configFilePath)
         << "   \"dynamic number of workers\": "
             << (AWSIM_DEFAULT_DYNAMIC_NUMBER_OF_WORKERS ? "true" : "false")
             << "," << std::endl
-        << "   \"localhost domain name\": ," << std::endl
+        << "   \"localhost domain name\": \"\"," << std::endl
         << "   \"minimum size of large files\": "
             << AWSIM_DEFAULT_MINIMUM_SIZE_OF_LARGE_FILES << ", " << std::endl
         << "   \"percent of cores as workers\": "
