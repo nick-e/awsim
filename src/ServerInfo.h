@@ -14,7 +14,9 @@ namespace awsim
     {
         sockaddr_storage address;
         std::unordered_map<std::string, Domain> domains;
+        std::unordered_map<std::string, Domain>::iterator localhostDomain;
         int httpSocket;
+        int httpsSocket;
         uint64_t minimumSizeOfLargeFiles;
         int workersWritefd;
     };

@@ -12,6 +12,11 @@ bool awsim::ParserDetails::domain_proven_missing() const
   return domainProvenMissing;
 }
 
+bool awsim::ParserDetails::is_localhost() const
+{
+  return isLocalhost;
+}
+
 bool awsim::ParserDetails::resource_proven_missing() const
 {
   return resourceProvenMissing;
@@ -41,6 +46,11 @@ void awsim::ParserDetails::set_current_header_field(
 void awsim::ParserDetails::set_domain_proven_missing()
 {
   domainProvenMissing = true;
+}
+
+void awsim::ParserDetails::set_is_localhost()
+{
+  isLocalhost = true;
 }
 
 void awsim::ParserDetails::set_resource_dynamic_page(DynamicPage dynamicPage)

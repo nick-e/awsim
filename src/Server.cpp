@@ -536,6 +536,8 @@ void awsim::Server::handle_workers()
 
 awsim::Server::Server()
 {
+    start();
+
     try
     {
         create_worker_pipe(&workersReadfd, &info.workersWritefd);
@@ -579,7 +581,7 @@ awsim::Server::Server()
             + ex.what());
     }
 
-    start();
+
     loop();
 }
 
@@ -683,6 +685,15 @@ void awsim::Server::start()
         {
             throw std::runtime_error("Failed to add domain \"" + domain.name
                 + "\" -> " + ex.what());
+        }
+
+        if (domain.name == config.localhostDomainName)
+        {
+            #ifdef AWSIM_DEBUG
+                syslog(LOG_DEBUG, "localhost domain is \"%s\"",
+                    domain.name.c_str());
+            #endif
+            info.localhostDomain = info.domains.find(domain.name);
         }
     }
 

@@ -1,6 +1,8 @@
 #include "Config.h"
 
 static void create_config_file(const std::string &configFilePath);
+static bool domains_contains(const std::string &domainName,
+    const std::vector<awsim::Config::Domain> domains);
 static FILE* get_config_file(const std::string &filePath);
 static void json_check_existance(rapidjson::Document &document,
     const std::string name);
@@ -9,8 +11,8 @@ static void json_check_existance(rapidjson::Value &value,
 static bool json_get_bool(rapidjson::Value &value);
 static double json_get_double(rapidjson::Value &value);
 static const char* json_get_string(rapidjson::Value &value);
-static void json_get_string_array(rapidjson::Value &parent,
-    const std::string &name, std::vector<std::string> &dst);
+/*static void json_get_string_array(rapidjson::Value &parent,
+    const std::string &name, std::vector<std::string> &dst);*/
 static uint16_t json_get_uint16(rapidjson::Value &value);
 static uint64_t json_get_uint64(rapidjson::Value &value);
 //static std::string json_value_to_string(const rapidjson::Value &value);
@@ -163,6 +165,13 @@ awsim::Config::Config(const std::string &filePath)
             + std::to_string(numberOfWorkers) + "\"");
     }
 
+    if (!domains_contains(localhostDomainName, domains))
+    {
+        throw std::runtime_error(
+            "\"localhost domain name\" was not found in the list of domains");
+    }
+
+
     fclose(fp);
 }
 
@@ -181,9 +190,11 @@ static void create_config_file(const std::string &configFilePath)
             << AWSIM_DEFAULT_CONSOLE_SOCKET_PATH << "\", " << std::endl
         << "   \"domains\": [" << std::endl
         << "      {" << std::endl
-        << "         \"dynamic pages\": []," << std::endl
+        << "         \"dynamic pages\": {}," << std::endl
         << "         \"name\": \"\"," << std::endl
-        << "         \"root directory\": \"\"" << std::endl
+        << "         \"root directory\": \"\"," << std::endl
+        << "         \"status code 403 URL\": \"\"," << std::endl
+        << "         \"status code 404 URL\": \"\"" << std::endl
         << "      }" << std::endl
         << "   ]," << std::endl
         << "   \"http port\": " << AWSIM_DEFAULT_HTTP_PORT_NUMBER << ", "
@@ -202,6 +213,19 @@ static void create_config_file(const std::string &configFilePath)
             << AWSIM_DEFAULT_STATIC_NUMBER_OF_WORKERS << std::endl
         << "}" << std::endl;
     stream.close();
+}
+
+static bool domains_contains(const std::string &domainName,
+    const std::vector<awsim::Config::Domain> domains)
+{
+    for (const awsim::Config::Domain &domain : domains)
+    {
+        if (domain.name == domainName)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 static FILE* get_config_file(const std::string &filePath)
@@ -232,11 +256,17 @@ static FILE* get_config_file(const std::string &filePath)
     return fp;
 }
 
-awsim::Config::Domain::Domain(const std::vector<std::string> &dynamicPages,
-    const std::string &name, const std::string &rootDirectory) :
+awsim::Config::Domain::Domain(const std::unordered_map<std::string, std::string>
+    &dynamicPages,
+    const std::string &name,
+    const std::string &rootDirectory,
+    const std::string &statusCode403Url,
+    const std::string &statusCode404Url) :
     dynamicPages(dynamicPages),
     name(name),
-    rootDirectory(rootDirectory)
+    rootDirectory(rootDirectory),
+    statusCode403Url(statusCode403Url),
+    statusCode404Url(statusCode404Url)
 {
 
 }
@@ -304,7 +334,7 @@ static const char* json_get_string(rapidjson::Value &value)
     return value.GetString();
 }
 
-static void json_get_string_array(rapidjson::Value &parent,
+/*static void json_get_string_array(rapidjson::Value &parent,
     const std::string &name, std::vector<std::string> &dst)
 {
     json_check_existance(parent, name);
@@ -327,7 +357,7 @@ static void json_get_string_array(rapidjson::Value &parent,
                 + std::to_string(index) + " -> " + ex.what());
         }
     }
-}
+}*/
 
 static uint16_t json_get_uint16(rapidjson::Value &value)
 {
@@ -426,10 +456,45 @@ static void parse_domains(rapidjson::Document &document,
     size_t index = 0;
     for (auto it = tmp.Begin(); it != tmp.End(); ++it, ++index)
     {
+        std::unordered_map<std::string, std::string> dynamicPages;
         std::string name;
         std::string rootDirectory;
-        std::vector<std::string> dynamicPages;
+        std::string statusCode403Url;
+        std::string statusCode404Url;
         rapidjson::Value &domain = *it;
+
+        try
+        {
+            json_check_existance(domain, "dynamic pages");
+            rapidjson::Value &tmp = domain["dynamic pages"];
+            if (!tmp.IsObject())
+            {
+                throw std::runtime_error("\"dynamic pages\" is not an object");
+            }
+            size_t index = 0;
+            for (rapidjson::Value::MemberIterator it = tmp.MemberBegin();
+                it != tmp.MemberEnd(); ++it, ++index)
+            {
+                try
+                {
+                    std::string url = json_get_string(it->name);
+                    std::string libFilePath = json_get_string(it->value);
+                    syslog(LOG_DEBUG, "%s, %s", url.c_str(), libFilePath.c_str());
+                    dynamicPages.emplace(url, libFilePath);
+                }
+                catch (const std::exception &ex)
+                {
+                    throw std::runtime_error("Failed to get string at index "
+                        + std::to_string(index) + " -> " + ex.what());
+                }
+            }
+        }
+        catch (const std::exception &ex)
+        {
+            throw std::runtime_error(
+                "Failed to get \"dynamic pages\" for domain "
+                + std::to_string(index + 1) + " -> " + ex.what());
+        }
 
         try
         {
@@ -456,16 +521,30 @@ static void parse_domains(rapidjson::Document &document,
 
         try
         {
-            json_get_string_array(domain, "dynamic pages", dynamicPages);
+            json_check_existance(domain, "status code 403 URL");
+            statusCode403Url = json_get_string(domain["status code 403 URL"]);
         }
         catch (const std::exception &ex)
         {
             throw std::runtime_error(
-                "Failed to get \"dynamic pages\" for domain "
+                "Failed to get \"status code 403 URL\" for domain "
                 + std::to_string(index + 1) + " -> " + ex.what());
         }
 
-        domains.emplace_back(dynamicPages, name, rootDirectory);
+        try
+        {
+            json_check_existance(domain, "status code 404 URL");
+            statusCode404Url = json_get_string(domain["status code 404 URL"]);
+        }
+        catch (const std::exception &ex)
+        {
+            throw std::runtime_error(
+                "Failed to get \"status code 404 URL\" for domain "
+                + std::to_string(index + 1) + " -> " + ex.what());
+        }
+
+        domains.emplace_back(dynamicPages, name, rootDirectory,
+            statusCode403Url, statusCode404Url);
     }
 }
 

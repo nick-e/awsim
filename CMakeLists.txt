@@ -17,17 +17,20 @@ add_library(dynapages SHARED
 find_package(Threads)
 add_executable(awsimd
     ${SRC_DIR}/awsimd.cpp
-    ${SRC_DIR}/Server.cpp
-    ${SRC_DIR}/Domain.cpp
-    ${SRC_DIR}/Config.cpp
-    ${SRC_DIR}/Worker.cpp
     ${SRC_DIR}/Client.cpp
+    ${SRC_DIR}/Config.cpp
     ${SRC_DIR}/CriticalException.cpp
+    ${SRC_DIR}/Domain.cpp
+    ${SRC_DIR}/DynamicPages.cpp
     ${SRC_DIR}/HttpParser.cpp
     ${SRC_DIR}/HttpRequest.cpp
-    ${SRC_DIR}/WorkerAndServerFlags.cpp
+    ${SRC_DIR}/HttpResponse.cpp
     ${SRC_DIR}/ParserDetails.cpp
-    ${SRC_DIR}/HttpResponse.cpp)
+    ${SRC_DIR}/Resource.cpp
+    ${SRC_DIR}/Server.cpp
+    ${SRC_DIR}/Worker.cpp
+    ${SRC_DIR}/WorkerAndServerFlags.cpp)
+
 target_include_directories(awsimd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includes)
 target_link_libraries(awsimd
     ${CMAKE_THREAD_LIBS_INIT}

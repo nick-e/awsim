@@ -6,6 +6,7 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <vector>
+#include <unordered_map>
 
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
@@ -19,12 +20,18 @@ namespace awsim
     {
         struct Domain
         {
-            std::vector<std::string> dynamicPages;
+            std::unordered_map<std::string, std::string> dynamicPages;
             std::string name;
             std::string rootDirectory;
+            std::string statusCode403Url;
+            std::string statusCode404Url;
 
-            Domain(const std::vector<std::string> &dynamicPages,
-                const std::string &name, const std::string &rootDirectory);
+            Domain(const std::unordered_map<std::string, std::string>
+                &dynamicPages,
+                const std::string &name,
+                const std::string &rootDirectory,
+                const std::string &statusCode403Url,
+                const std::string &statusCode404Url);
         };
 
         std::vector<Domain> domains;

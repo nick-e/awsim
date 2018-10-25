@@ -16,12 +16,14 @@ namespace awsim
         ParserDetails(const std::unordered_map<std::string, Domain> &domains);
 
         bool domain_proven_missing() const;
+        bool is_localhost() const;
         bool resource_proven_missing() const;
         bool resource_proven_static() const;
         HttpRequest::Field get_current_header_field() const;
         DynamicPage get_resource_dynamic_page() const;
         void set_current_header_field(HttpRequest::Field headerField);
         void set_domain_proven_missing();
+        void set_is_localhost();
         void set_resource_dynamic_page(DynamicPage dynamicPage);
         void set_resource_proven_missing();
         void set_resource_proven_static();
@@ -29,6 +31,7 @@ namespace awsim
     private:
         HttpRequest::Field currentHeaderField = HttpRequest::Field::Unknown;
 
+        bool isLocalhost = false;
         bool domainProvenMissing = false;
         DynamicPage resourceDynamicPage = nullptr;
         bool resourceProvenMissing = false;

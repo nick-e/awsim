@@ -193,7 +193,8 @@ static int on_header_value(awsim::HttpRequest *request,
     UNUSED(parser);
     UNUSED(details);
 
-    if (!details->domain_proven_missing() && !details->resource_proven_missing()
+    if (!details->domain_proven_missing()
+        && !details->resource_proven_missing()
         && !details->resource_proven_static())
     {
         awsim::HttpRequest::Field headerField =
@@ -202,14 +203,22 @@ static int on_header_value(awsim::HttpRequest *request,
         {
             case awsim::HttpRequest::Field::Host:
             {
-                const auto it = details->domains.find(std::string(at, length));
+                std::string tmp = std::string(at, length);
+                const auto it = details->domains.find(tmp);
 
                 request->host.buffer = at;
                 request->host.length = length;
                 request->host.set = true;
                 if (it == details->domains.end())
                 {
-                    details->set_domain_proven_missing();
+                    if (tmp == "localhost")
+                    {
+                        details->set_is_localhost();
+                    }
+                    else
+                    {
+                        details->set_domain_proven_missing();
+                    }
                 }
                 else if (access(at[0] == '/' ? (at + 1) : at, F_OK) == -1)
                 {
@@ -580,6 +589,7 @@ void awsim::Worker::handle_client(Client *client)
                 "(Worker %" PRIu64 ") Client requested unknown domain \"%.*s\"",
                 id, (int)request.host.length, request.host.buffer);
         #endif
+        remove_client(client);
     }
     else if (details.resource_proven_missing())
     {

@@ -8,37 +8,28 @@
 #include "Client.h"
 #include "Config.h"
 #include "DynamicPage.h"
+#include "DynamicPages.h"
 #include "HttpRequest.h"
+#include "Resource.h"
 
 namespace awsim
 {
-
     class Domain
     {
     public:
         const std::string name;
         const std::string rootDirectory;
+        const Resource *statusCode403Resource;
+        const Resource *statusCode404Resource;
 
         Domain(const Config::Domain &domain);
+        ~Domain();
 
         DynamicPage get_dynamic_page(const std::string &url) const;
 
     private:
-        struct Triple;
-        typedef std::unordered_map<std::string, Triple> DynamicPageMap;
-        struct Triple
-        {
-            DynamicPage dynamicPage;
-            void *lib;
-            DynamicPageMap *nextMap;
-
-            Triple(DynamicPage dynamicPage, void *lib);
-            ~Triple();
-        };
-
-        DynamicPageMap dynamicPages;
-
-        void insert_dynamic_page(void *lib);
+        DynamicPages dynamicPages;
+        int directoryFd;
     };
 }
 
