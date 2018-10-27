@@ -6,37 +6,30 @@
 #include "Domain.h"
 #include "DynamicPage.h"
 #include "HttpRequest.h"
+#include "Resource.h"
 
 namespace awsim
 {
     class ParserDetails {
     public:
-        const std::unordered_map<std::string, Domain> domains;
+        class DomainNotFound : public std::exception {};
 
-        ParserDetails(const std::unordered_map<std::string, Domain> &domains);
-
-        bool domain_proven_missing() const;
-        bool is_localhost() const;
-        bool resource_proven_missing() const;
-        bool resource_proven_static() const;
-        HttpRequest::Field get_current_header_field() const;
-        DynamicPage get_resource_dynamic_page() const;
-        void set_current_header_field(HttpRequest::Field headerField);
-        void set_domain_proven_missing();
-        void set_is_localhost();
-        void set_resource_dynamic_page(DynamicPage dynamicPage);
-        void set_resource_proven_missing();
-        void set_resource_proven_static();
-
-    private:
         HttpRequest::Field currentHeaderField = HttpRequest::Field::Unknown;
 
-        bool isLocalhost = false;
-        bool domainProvenMissing = false;
-        DynamicPage resourceDynamicPage = nullptr;
-        bool resourceProvenMissing = false;
-        bool resourceProvenStatic = false;
-        int staticFileFd = -1;
+        ParserDetails(const std::unordered_map<std::string, Domain> &domains,
+            std::unordered_map<std::string, Domain>::iterator localhostDomain);
+
+        void get_resource(const HttpRequest::Value &url,
+            const HttpRequest::Value &host);
+        void respond(HttpRequest *request, Client *client);
+
+    private:
+        bool resourceNotFound = false;
+        bool resourceForbidden = false;
+        Resource resource;
+        const std::unordered_map<std::string, Domain> domains;
+        const std::unordered_map<std::string, Domain>::iterator localhostDomain;
+        const Domain *domain;
     };
 }
 

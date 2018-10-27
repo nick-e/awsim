@@ -102,34 +102,34 @@ static int on_header_field(awsim::HttpRequest *request,
     UNUSED(request);
     UNUSED(parser);
 
-    awsim::HttpRequest::Field headerField = awsim::HttpRequest::Field::Unknown;
+    details->currentHeaderField = awsim::HttpRequest::Field::Unknown;
     if (length > 0)
     {
         switch (at[0])
         {
             case 'H':
-                headerField = awsim::HttpRequest::Field::Host;
+                details->currentHeaderField = awsim::HttpRequest::Field::Host;
                 break;
             case 'A':
                 // or maybe Accept-Language or Accept-Encoding
-                headerField = awsim::HttpRequest::Field::Accept;
+                details->currentHeaderField = awsim::HttpRequest::Field::Accept;
                 break;
             case 'C':
-                headerField = awsim::HttpRequest::Field::Connection;
+                details->currentHeaderField = awsim::HttpRequest::Field::Connection;
                 break;
             case 'U':
                 // or maybe Upgrade-Insecure-Requests
-                headerField = awsim::HttpRequest::Field::UserAgent;
+                details->currentHeaderField = awsim::HttpRequest::Field::UserAgent;
                 break;
             default:
-                headerField = awsim::HttpRequest::Field::Unknown;
+                details->currentHeaderField = awsim::HttpRequest::Field::Unknown;
                 break;
         }
     }
 
-    if (headerField != awsim::HttpRequest::Field::Unknown)
+    if (details->currentHeaderField != awsim::HttpRequest::Field::Unknown)
     {
-        fieldString = awsim::HttpRequest::fieldStrings[(int)headerField];
+        fieldString = awsim::HttpRequest::fieldStrings[(int)details->currentHeaderField];
         for (size_t i = 0; i < length; ++i)
         {
             char actual = at[i];
@@ -137,47 +137,45 @@ static int on_header_field(awsim::HttpRequest *request,
 
             if (actual != desired)
             {
-                if (headerField == awsim::HttpRequest::Field::Accept)
+                if (details->currentHeaderField == awsim::HttpRequest::Field::Accept)
                 {
-                    headerField = awsim::HttpRequest::Field::AcceptEncoding;
+                    details->currentHeaderField = awsim::HttpRequest::Field::AcceptEncoding;
                     fieldString =
-                        awsim::HttpRequest::fieldStrings[(int)headerField];
+                        awsim::HttpRequest::fieldStrings[(int)details->currentHeaderField];
                     --i;
                 }
-                else if (headerField ==
+                else if (details->currentHeaderField ==
                     awsim::HttpRequest::Field::AcceptEncoding)
                 {
-                    headerField = awsim::HttpRequest::Field::AcceptLanguage;
+                    details->currentHeaderField = awsim::HttpRequest::Field::AcceptLanguage;
                     fieldString =
-                        awsim::HttpRequest::fieldStrings[(int)headerField];
+                        awsim::HttpRequest::fieldStrings[(int)details->currentHeaderField];
                     --i;
                 }
-                else if (headerField == awsim::HttpRequest::Field::UserAgent)
+                else if (details->currentHeaderField == awsim::HttpRequest::Field::UserAgent)
                 {
-                    headerField =
+                    details->currentHeaderField =
                         awsim::HttpRequest::Field::UpgradeInsecureRequests;
                     fieldString =
-                        awsim::HttpRequest::fieldStrings[(int)headerField];
+                        awsim::HttpRequest::fieldStrings[(int)details->currentHeaderField];
                     --i;
                 }
                 else
                 {
-                    headerField = awsim::HttpRequest::Field::Unknown;
+                    details->currentHeaderField = awsim::HttpRequest::Field::Unknown;
                     break;
                 }
             }
             else if (i == length - 1 && fieldString[i + 1] != '\0')
             {
-                headerField = awsim::HttpRequest::Field::Unknown;
+                details->currentHeaderField = awsim::HttpRequest::Field::Unknown;
                 break;
             }
         }
     }
 
-    details->set_current_header_field(headerField);
-
     #ifdef AWSIM_DEBUG
-        if (headerField == awsim::HttpRequest::Field::Unknown)
+        if (details->currentHeaderField  == awsim::HttpRequest::Field::Unknown)
         {
             syslog(LOG_DEBUG, "Unknown header field \"%.*s\"", (int)length, at);
         }
@@ -193,90 +191,63 @@ static int on_header_value(awsim::HttpRequest *request,
     UNUSED(parser);
     UNUSED(details);
 
-    if (!details->domain_proven_missing()
-        && !details->resource_proven_missing()
-        && !details->resource_proven_static())
+    switch (details->currentHeaderField)
     {
-        awsim::HttpRequest::Field headerField =
-            details->get_current_header_field();
-        switch (headerField)
+        case awsim::HttpRequest::Field::Host:
         {
-            case awsim::HttpRequest::Field::Host:
+            request->host.buffer = at;
+            request->host.length = length;
+            request->host.set = true;
+            try
             {
-                std::string tmp = std::string(at, length);
-                const auto it = details->domains.find(tmp);
-
-                request->host.buffer = at;
-                request->host.length = length;
-                request->host.set = true;
-                if (it == details->domains.end())
-                {
-                    if (tmp == "localhost")
-                    {
-                        details->set_is_localhost();
-                    }
-                    else
-                    {
-                        details->set_domain_proven_missing();
-                    }
-                }
-                else if (access(at[0] == '/' ? (at + 1) : at, F_OK) == -1)
-                {
-                    awsim::DynamicPage dynamicPage =
-                        it->second.get_dynamic_page(
-                        std::string(request->url.buffer, request->url.length));
-
-                    if (dynamicPage == nullptr)
-                    {
-                        details->set_resource_proven_missing();
-                    }
-                    else
-                    {
-                        details->set_resource_dynamic_page(dynamicPage);
-                    }
-                }
-                else
-                {
-                    details->set_resource_proven_static();
-                }
-                break;
+                details->get_resource(request->url, request->host);
             }
-            case awsim::HttpRequest::Field::UserAgent:
-                request->userAgent.buffer = at;
-                request->userAgent.length = length;
-                request->userAgent.set = true;
-                break;
-            case awsim::HttpRequest::Field::Accept:
-                request->accept.buffer = at;
-                request->accept.length = length;
-                request->accept.set = true;
-                break;
-            case awsim::HttpRequest::Field::AcceptLanguage:
-                request->acceptLanguage.buffer = at;
-                request->acceptLanguage.length = length;
-                request->acceptLanguage.set = true;
-                break;
-            case awsim::HttpRequest::Field::AcceptEncoding:
-                request->acceptEncoding.buffer = at;
-                request->acceptEncoding.length = length;
-                request->acceptEncoding.set = true;
-                break;
-            case awsim::HttpRequest::Field::Connection:
-                request->connection.buffer = at;
-                request->connection.length = length;
-                request->connection.set = true;
-                break;
-            case awsim::HttpRequest::Field::UpgradeInsecureRequests:
-                request->upgradeInsecureRequests.buffer = at;
-                request->upgradeInsecureRequests.length = length;
-                request->upgradeInsecureRequests.set = true;
-                break;
-            case awsim::HttpRequest::Field::Unknown:
-            default:
-                syslog(LOG_WARNING, "Unknown header value \"%.*s\"", (int)length,
-                    at);
-                break;
+            catch (const awsim::ParserDetails::DomainNotFound &ex)
+            {
+                #ifndef AWSIM_DEBUG
+                    syslog(LOG_DEBUG,
+                        "Client HTTP request included unknown host \"%.*s\"",
+                        length, at);
+                #endif
+                return -1;
+            }
+            break;
         }
+        case awsim::HttpRequest::Field::UserAgent:
+            request->userAgent.buffer = at;
+            request->userAgent.length = length;
+            request->userAgent.set = true;
+            break;
+        case awsim::HttpRequest::Field::Accept:
+            request->accept.buffer = at;
+            request->accept.length = length;
+            request->accept.set = true;
+            break;
+        case awsim::HttpRequest::Field::AcceptLanguage:
+            request->acceptLanguage.buffer = at;
+            request->acceptLanguage.length = length;
+            request->acceptLanguage.set = true;
+            break;
+        case awsim::HttpRequest::Field::AcceptEncoding:
+            request->acceptEncoding.buffer = at;
+            request->acceptEncoding.length = length;
+            request->acceptEncoding.set = true;
+            break;
+        case awsim::HttpRequest::Field::Connection:
+            request->connection.buffer = at;
+            request->connection.length = length;
+            request->connection.set = true;
+            break;
+        case awsim::HttpRequest::Field::UpgradeInsecureRequests:
+            request->upgradeInsecureRequests.buffer = at;
+            request->upgradeInsecureRequests.length = length;
+            request->upgradeInsecureRequests.set = true;
+            break;
+        case awsim::HttpRequest::Field::Unknown:
+        default:
+            syslog(LOG_WARNING, "Unknown header value \"%.*s\"", (int)length,
+                at);
+            break;
     }
 
     return 0;
@@ -550,8 +521,6 @@ void awsim::Worker::handle_client(Client *client)
     ssize_t length;
     size_t nparsed;
     HttpRequest request;
-    struct stat *stat = nullptr;
-    int fd;
 
     #ifdef AWSIM_DEBUG
         syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Handling a client", id);
@@ -572,8 +541,7 @@ void awsim::Worker::handle_client(Client *client)
         return;
     }
 
-    ParserDetails details(serverInfo.domains);
-    httpParser.data = client;
+    ParserDetails details(serverInfo.domains, serverInfo.localhostDomain);
     nparsed = http_parser_execute(&request, &details, &httpParser,
         &httpParserSettings, buffer, length);
     if (nparsed != (size_t)length)
@@ -581,90 +549,9 @@ void awsim::Worker::handle_client(Client *client)
         remove_client(client);
         throw std::runtime_error("Failed to parse HTTP request");
     }
-
-    if (details.domain_proven_missing())
-    {
-        #ifdef AWSIM_DEBUG
-            syslog(LOG_DEBUG,
-                "(Worker %" PRIu64 ") Client requested unknown domain \"%.*s\"",
-                id, (int)request.host.length, request.host.buffer);
-        #endif
-        remove_client(client);
-    }
-    else if (details.resource_proven_missing())
-    {
-        #ifdef AWSIM_DEBUG
-            syslog(LOG_DEBUG, "(Worker %" PRIu64 ") Client requested missing "
-                "resource \"%.*s\"", id, (int)request.url.length,
-                request.url.buffer);
-        #endif
-    }
-    if (details.resource_proven_static())
-    {
-        #ifdef AWSIM_DEBUG
-            syslog(LOG_DEBUG,
-                "(Worker %" PRIu64 ") Sending HTTP response for \"%.*s\"", id,
-                (int)request.url.length, request.url.buffer);
-        #endif
-        buffer[(request.url.buffer - buffer) + request.url.length] = '\0';
-        fd = open(request.url.buffer, NO_FLAGS);
-        if (fd == -1)
-        {
-            if (errno == EACCES)
-            {
-                // TODO: send 404
-            }
-            else
-            {
-                throw std::runtime_error("Failed to open resource \""
-                    + std::string(request.url.buffer) + "\" -> "
-                    + strerror(errno));
-            }
-        }
-        if (fstat(fd, stat) == -1)
-        {
-            throw std::runtime_error("fstat(" + std::to_string(fd)
-                + ", stat) failed -> " + strerror(errno));
-        }
-        if ((unsigned)stat->st_size >= serverInfo.minimumSizeOfLargeFiles)
-        {
-            // TODO: send to large file handler
-        }
-        else
-        {
-
-            HttpResponse response(1, 1, HttpResponse::StatusCode::OK_200);
-            response.set_content_length(stat->st_size);
-            try
-            {
-                response.send_to(client->sock);
-            }
-            catch (const std::exception &ex)
-            {
-                throw std::runtime_error(
-                    std::string("Failed to send HTTP response -> ")
-                    + ex.what());
-            }
-            size_t sent = 0;
-            while (sent < (unsigned)stat->st_size)
-            {
-                ssize_t tmp = sendfile(client->sock, fd, nullptr,
-                    stat->st_size);
-                if (tmp == -1)
-                {
-                    throw std::runtime_error("sendfile("
-                        + std::to_string(client->sock) + ", "
-                        + std::to_string(fd) + ", nullptr, "
-                        + std::to_string(stat->st_size) + ") failed -> "
-                        + strerror(errno));
-                }
-                sent += tmp;
-            }
-        }
-    }
     else
     {
-        // TODO: send to dynamic file handler
+        details.respond(&request, client);
     }
 }
 

@@ -16,6 +16,7 @@ void awsim::Resource::get_static_file(const std::string &url,
             case ENOENT:
             case ENOTDIR:
             case EFAULT:
+                isStatic = false;
                 // File is missing; it may be a dynamic page
                 return;
             default:
@@ -36,8 +37,8 @@ void awsim::Resource::get_static_file(const std::string &url,
     isStatic = true;
 }
 
-awsim::Resource::Resource(const std::string &url, int rootDirectoryFd,
-    DynamicPages &dynamicPages)
+void awsim::Resource::init(const std::string &url, int rootDirectoryFd,
+    const DynamicPages &dynamicPages)
 {
     get_static_file(url, rootDirectoryFd);
     if (!isStatic)
@@ -50,6 +51,22 @@ awsim::Resource::Resource(const std::string &url, int rootDirectoryFd,
     }
 }
 
+bool awsim::Resource::is_static()
+{
+    return isStatic;
+}
+
+awsim::Resource::Resource()
+{
+
+}
+
+awsim::Resource::Resource(const std::string &url, int rootDirectoryFd,
+    const DynamicPages &dynamicPages)
+{
+    init(url, rootDirectoryFd, dynamicPages);
+}
+
 awsim::Resource::~Resource()
 {
     if (isStatic)
@@ -58,7 +75,7 @@ awsim::Resource::~Resource()
     }
 }
 
-void awsim::Resource::respond(HttpRequest *request, Client *client)
+void awsim::Resource::respond(HttpRequest *request, Client *client) const
 {
     if (isStatic)
     {
@@ -70,7 +87,8 @@ void awsim::Resource::respond(HttpRequest *request, Client *client)
     }
 }
 
-void awsim::Resource::send_static_file(int sock) {
+void awsim::Resource::send_static_file(int sock) const
+{
     HttpResponse response(1, 1, HttpResponse::StatusCode::OK_200);
     response.set_content_length(staticFileSize);
     try

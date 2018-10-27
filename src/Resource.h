@@ -21,20 +21,23 @@ namespace awsim
 
         struct FileNotFoundException : public std::exception {};
 
-        Resource(const std::string &resource, int rootDirectoryFd,
-            DynamicPages &dynamicPages);
+        Resource(const std::string &url, int rootDirectoryFd,
+            const DynamicPages &dynamicPages);
+        Resource();
         ~Resource();
 
-        void respond(HttpRequest *request, Client *client);
-
+        void respond(HttpRequest *request, Client *client) const;
+        void init(const std::string &url, int rootDirectoryFd,
+            const DynamicPages &dynamicPages);
+        bool is_static();
     private:
-        bool isStatic = false;
+        bool isStatic;
         DynamicPage dynamicPage;
         int staticFileFd;
         size_t staticFileSize;
 
         void get_static_file(const std::string &url, int rootDirectoryFd);
-        void send_static_file(int sock);
+        void send_static_file(int sock) const;
     };
 }
 

@@ -30,7 +30,7 @@ awsim::Domain::Domain(const Config::Domain &domain) :
 
     try
     {
-        statusCode403Resource = new Resource(domain.statusCode403Url,
+        statusCode403Resource.init(domain.statusCode403Url,
             directoryFd, dynamicPages);
     }
     catch (const Resource::FileForbiddenException &ex)
@@ -51,7 +51,7 @@ awsim::Domain::Domain(const Config::Domain &domain) :
 
     try
     {
-        statusCode404Resource = new Resource(domain.statusCode404Url,
+        statusCode404Resource.init(domain.statusCode404Url,
             directoryFd, dynamicPages);
     }
     catch (const Resource::FileForbiddenException &ex)
@@ -73,12 +73,25 @@ awsim::Domain::Domain(const Config::Domain &domain) :
 
 awsim::Domain::~Domain()
 {
-    delete statusCode403Resource;
-    delete statusCode404Resource;
     close(directoryFd);
 }
 
 awsim::DynamicPage awsim::Domain::get_dynamic_page(const std::string &url) const
 {
     return dynamicPages.get_dynamic_page(url);
+}
+
+void awsim::Domain::get_resource(std::string url, Resource &destination) const
+{
+    destination.init(url, directoryFd, dynamicPages);
+}
+
+void awsim::Domain::send_403(HttpRequest *request, Client *client) const
+{
+    statusCode403Resource.respond(request, client);
+}
+
+void awsim::Domain::send_404(HttpRequest *request, Client *client) const
+{
+    statusCode404Resource.respond(request, client);
 }
